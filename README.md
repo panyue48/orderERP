@@ -196,23 +196,5 @@ mvn test
 
 ---
 
-## 7. Git 初始化并推送到远程仓库
 
-在项目根目录执行（把 `<YOUR_REMOTE_URL>` 换成你的远程仓库地址）：
-
-```
-cd c:\traewrokplace\orderERP
-
-git init
-git add .
-git commit -m "init orderERP"
-
-# 可选：默认分支命名为 main
-git branch -M main
-
-git remote add origin <YOUR_REMOTE_URL>
-git push -u origin main
-```
-
-如果你希望推送时忽略 `backend/target/`、`frontend/node_modules/` 等，请确认 `.gitignore` 已覆盖这些目录。
 
