@@ -1,0 +1,49 @@
+## Node
+node_modules/
+dist/
+.vite/
+.cache/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+.output/
+coverage/
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+npm-debug.log*
+.env
+.env.*
+
+## Java
+target/
+*.class
+*.log
+*.jar
+*.war
+*.ear
+.classpath
+.project
+.settings/
+.idea/
+*.iml
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## IDE / tooling
+.vscode/
+.history/
+
+## Runtime / local data (do not commit)
+uploads/
+*.tmp
+*.swp
+*.swo
+
+## Local test data files
+_test_*.xlsx
+

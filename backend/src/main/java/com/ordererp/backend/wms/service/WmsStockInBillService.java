@@ -1,0 +1,528 @@
+package com.ordererp.backend.wms.service;
+
+import com.ordererp.backend.base.repository.BaseProductRepository;
+import com.ordererp.backend.base.repository.BaseWarehouseRepository;
+import com.ordererp.backend.wms.dto.StockInBillCreateRequest;
+import com.ordererp.backend.wms.dto.StockInBillDetailResponse;
+import com.ordererp.backend.wms.dto.StockInBillItemResponse;
+import com.ordererp.backend.wms.dto.StockInBillResponse;
+import com.ordererp.backend.wms.dto.StockInBillLineRequest;
+import com.ordererp.backend.wms.dto.WmsBillPrecheckLine;
+import com.ordererp.backend.wms.dto.WmsBillPrecheckResponse;
+import com.ordererp.backend.wms.dto.WmsReverseResponse;
+import com.ordererp.backend.wms.entity.WmsIoBill;
+import com.ordererp.backend.wms.entity.WmsIoBillDetail;
+import com.ordererp.backend.wms.entity.WmsStock;
+import com.ordererp.backend.wms.entity.WmsStockLog;
+import com.ordererp.backend.wms.repository.WmsIoBillDetailRepository;
+import com.ordererp.backend.wms.repository.WmsIoBillRepository;
+import com.ordererp.backend.wms.repository.WmsStockLogRepository;
+import com.ordererp.backend.wms.repository.WmsStockRepository;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Objects;
+import java.util.Set;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+@Service
+public class WmsStockInBillService {
+    private static final int BILL_TYPE_STOCK_IN = 3;
+    private static final int BILL_TYPE_STOCK_OUT = 4;
+    private static final int STATUS_PENDING = 1;
+    private static final int STATUS_COMPLETED = 2;
+
+    private final WmsIoBillRepository billRepository;
+    private final WmsIoBillDetailRepository billDetailRepository;
+    private final WmsStockRepository stockRepository;
+    private final WmsStockLogRepository stockLogRepository;
+    private final BaseWarehouseRepository warehouseRepository;
+    private final BaseProductRepository productRepository;
+
+    public WmsStockInBillService(WmsIoBillRepository billRepository, WmsIoBillDetailRepository billDetailRepository,
+            WmsStockRepository stockRepository, WmsStockLogRepository stockLogRepository,
+            BaseWarehouseRepository warehouseRepository, BaseProductRepository productRepository) {
+        this.billRepository = billRepository;
+        this.billDetailRepository = billDetailRepository;
+        this.stockRepository = stockRepository;
+        this.stockLogRepository = stockLogRepository;
+        this.warehouseRepository = warehouseRepository;
+        this.productRepository = productRepository;
+    }
+
+    public Page<StockInBillResponse> page(String keyword, Pageable pageable) {
+        return billRepository.pageBillRows(BILL_TYPE_STOCK_IN, keyword, pageable)
+                .map(r -> new StockInBillResponse(
+                        r.getId(),
+                        r.getBillNo(),
+                        r.getWarehouseId(),
+                        r.getWarehouseName(),
+                        r.getStatus(),
+                        r.getTotalQty(),
+                        r.getRemark(),
+                        r.getCreateBy(),
+                        r.getCreateTime()));
+    }
+
+    public StockInBillDetailResponse detail(Long id) {
+        WmsIoBillRepository.BillRow bill = billRepository.getBillRow(id);
+        if (bill == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "bill not found");
+        }
+        List<StockInBillItemResponse> items = billDetailRepository.listBillItemRows(id).stream()
+                .map(r -> new StockInBillItemResponse(
+                        r.getId(),
+                        r.getProductId(),
+                        r.getProductCode(),
+                        r.getProductName(),
+                        r.getUnit(),
+                        r.getQty(),
+                        r.getRealQty()))
+                .toList();
+        return new StockInBillDetailResponse(
+                bill.getId(),
+                bill.getBillNo(),
+                bill.getWarehouseId(),
+                bill.getWarehouseName(),
+                bill.getStatus(),
+                bill.getTotalQty(),
+                bill.getRemark(),
+                bill.getCreateBy(),
+                bill.getCreateTime(),
+                items);
+    }
+
+    public WmsBillPrecheckResponse precheckExecute(Long id) {
+        WmsIoBill bill = billRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "bill not found"));
+        if (!Objects.equals(bill.getType(), BILL_TYPE_STOCK_IN)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill type mismatch");
+        }
+        if (Objects.equals(bill.getStatus(), STATUS_COMPLETED)) {
+            return new WmsBillPrecheckResponse(true, "already completed", List.of());
+        }
+
+        var wh = warehouseRepository.findByIdAndDeleted(bill.getWarehouseId(), 0)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "warehouse not found"));
+        if (wh.getStatus() != null && wh.getStatus() != 1) {
+            return new WmsBillPrecheckResponse(false, "warehouse disabled", List.of());
+        }
+
+        List<WmsIoBillDetail> details = billDetailRepository.findByBillId(bill.getId());
+        if (details.isEmpty()) {
+            return new WmsBillPrecheckResponse(false, "bill has no details", List.of());
+        }
+
+        List<WmsBillPrecheckLine> lines = new ArrayList<>();
+        boolean ok = true;
+        String message = "ok";
+        Set<Long> seen = new HashSet<>();
+        var itemRows = billDetailRepository.listBillItemRows(bill.getId());
+        for (WmsIoBillDetail d : details) {
+            boolean lineOk = true;
+            String lineMsg = "ok";
+            if (d.getProductId() == null || !seen.add(d.getProductId())) {
+                lineOk = false;
+                lineMsg = "duplicate product";
+            }
+            if (d.getRealQty() != null && d.getRealQty().compareTo(BigDecimal.ZERO) > 0) {
+                lineOk = false;
+                lineMsg = "already executed";
+            }
+            BigDecimal qty = safeQty(d.getQty());
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+                lineOk = false;
+                lineMsg = "qty must be positive";
+            }
+
+            var item = itemRows.stream().filter(r -> Objects.equals(r.getId(), d.getId())).findFirst().orElse(null);
+
+            String productCode = item != null ? item.getProductCode() : null;
+            String productName = item != null ? item.getProductName() : null;
+            String unit = item != null ? item.getUnit() : null;
+
+            if (d.getProductId() != null) {
+                var p = productRepository.findByIdAndDeleted(d.getProductId(), 0).orElse(null);
+                if (p == null) {
+                    lineOk = false;
+                    lineMsg = "product not found";
+                } else if (p.getStatus() != null && p.getStatus() != 1) {
+                    lineOk = false;
+                    lineMsg = "product disabled";
+                } else {
+                    if (productCode == null) productCode = p.getProductCode();
+                    if (productName == null) productName = p.getProductName();
+                    if (unit == null) unit = p.getUnit();
+                }
+            }
+
+            if (!lineOk) ok = false;
+            lines.add(new WmsBillPrecheckLine(d.getProductId(), productCode, productName, unit, qty, null, null, null, lineOk, lineMsg));
+        }
+
+        if (!ok) message = "precheck failed";
+        return new WmsBillPrecheckResponse(ok, message, lines);
+    }
+
+    @Transactional
+    public WmsReverseResponse reverse(Long id, String createdBy) {
+        WmsIoBill bill = billRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "bill not found"));
+        if (!Objects.equals(bill.getType(), BILL_TYPE_STOCK_IN)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill type mismatch");
+        }
+        if (!Objects.equals(bill.getStatus(), STATUS_COMPLETED)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill not completed");
+        }
+        if (bill.getBizId() != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot reverse a reversal bill");
+        }
+
+        WmsIoBill existing = billRepository.findFirstByBizIdAndType(bill.getId(), BILL_TYPE_STOCK_OUT).orElse(null);
+        if (existing != null) {
+            return new WmsReverseResponse(existing.getId(), existing.getBillNo());
+        }
+
+        List<WmsIoBillDetail> details = billDetailRepository.findByBillId(bill.getId());
+        if (details.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill has no details");
+        }
+
+        // Reversal of stock-in means deduct stock (stock-out). Ensure enough available stock.
+        for (WmsIoBillDetail d : details) {
+            BigDecimal qty = safeQty(d.getRealQty());
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+                qty = safeQty(d.getQty());
+            }
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid executed qty on detail: " + d.getId());
+            }
+            WmsStock stock = stockRepository.findFirstByWarehouseIdAndProductId(bill.getWarehouseId(), d.getProductId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "stock not found"));
+            BigDecimal stockQty = safeQty(stock.getStockQty());
+            BigDecimal lockedQty = safeQty(stock.getLockedQty());
+            BigDecimal available = stockQty.subtract(lockedQty);
+            if (available.compareTo(qty) < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "insufficient stock for reversal (productId=" + d.getProductId() + ", available=" + available + ", required=" + qty + ")");
+            }
+        }
+
+        WmsIoBill reversal = new WmsIoBill();
+        reversal.setBillNo(generateBillNo("RSI"));
+        reversal.setType(BILL_TYPE_STOCK_OUT);
+        reversal.setBizId(bill.getId());
+        reversal.setBizNo(bill.getBillNo());
+        reversal.setWarehouseId(bill.getWarehouseId());
+        reversal.setStatus(STATUS_COMPLETED);
+        reversal.setRemark("冲销盘点入库: " + bill.getBillNo());
+        reversal.setCreateBy(trimToNull(createdBy));
+        reversal.setCreateTime(LocalDateTime.now());
+        try {
+            reversal = billRepository.saveAndFlush(reversal);
+        } catch (DataIntegrityViolationException e) {
+            // Unique(biz_id, type) hit under concurrent reversals: return existing record (idempotent).
+            existing = billRepository.findFirstByBizIdAndType(bill.getId(), BILL_TYPE_STOCK_OUT).orElse(null);
+            if (existing != null) {
+                return new WmsReverseResponse(existing.getId(), existing.getBillNo());
+            }
+            throw e;
+        }
+
+        for (WmsIoBillDetail d : details) {
+            BigDecimal qty = safeQty(d.getRealQty());
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) qty = safeQty(d.getQty());
+
+            WmsIoBillDetail rd = new WmsIoBillDetail();
+            rd.setBillId(reversal.getId());
+            rd.setProductId(d.getProductId());
+            rd.setQty(qty);
+            rd.setRealQty(qty);
+            billDetailRepository.save(rd);
+
+            WmsStock stock = deductStockWithRetry(bill.getWarehouseId(), d.getProductId(), qty);
+            WmsStockLog log = new WmsStockLog();
+            log.setWarehouseId(bill.getWarehouseId());
+            log.setProductId(d.getProductId());
+            log.setBizType("REVERSAL_IN");
+            log.setBizNo(reversal.getBillNo());
+            log.setChangeQty(qty.negate());
+            log.setAfterStockQty(safeQty(stock.getStockQty()));
+            log.setCreateTime(LocalDateTime.now());
+            stockLogRepository.save(log);
+        }
+
+        return new WmsReverseResponse(reversal.getId(), reversal.getBillNo());
+    }
+
+    @Transactional
+    public StockInBillResponse create(StockInBillCreateRequest request, String createdBy) {
+        var wh = warehouseRepository.findByIdAndDeleted(request.warehouseId(), 0)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "warehouse not found"));
+        if (wh.getStatus() != null && wh.getStatus() != 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "warehouse disabled");
+        }
+
+        validateLines(request.lines());
+
+        WmsIoBill bill = new WmsIoBill();
+        bill.setBillNo(generateBillNo());
+        bill.setType(BILL_TYPE_STOCK_IN);
+        bill.setWarehouseId(request.warehouseId());
+        bill.setStatus(STATUS_PENDING);
+        bill.setRemark(trimToNull(request.remark()));
+        bill.setCreateBy(trimToNull(createdBy));
+        bill.setCreateTime(LocalDateTime.now());
+        bill = billRepository.save(bill);
+
+        for (StockInBillLineRequest line : request.lines()) {
+            var p = productRepository.findByIdAndDeleted(line.productId(), 0)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "product not found: " + line.productId()));
+            if (p.getStatus() != null && p.getStatus() != 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "product disabled: " + line.productId());
+            }
+            WmsIoBillDetail d = new WmsIoBillDetail();
+            d.setBillId(bill.getId());
+            d.setProductId(line.productId());
+            d.setQty(line.qty());
+            d.setRealQty(BigDecimal.ZERO);
+            billDetailRepository.save(d);
+        }
+
+        WmsIoBillRepository.BillRow row = billRepository.getBillRow(bill.getId());
+        return new StockInBillResponse(
+                row.getId(),
+                row.getBillNo(),
+                row.getWarehouseId(),
+                row.getWarehouseName(),
+                row.getStatus(),
+                row.getTotalQty(),
+                row.getRemark(),
+                row.getCreateBy(),
+                row.getCreateTime());
+    }
+
+    @Transactional
+    public StockInBillResponse execute(Long id) {
+        WmsIoBill bill = billRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "bill not found"));
+        if (!Objects.equals(bill.getType(), BILL_TYPE_STOCK_IN)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill type mismatch");
+        }
+        if (Objects.equals(bill.getStatus(), STATUS_COMPLETED)) {
+            WmsIoBillRepository.BillRow row = billRepository.getBillRow(bill.getId());
+            return new StockInBillResponse(
+                    row.getId(),
+                    row.getBillNo(),
+                    row.getWarehouseId(),
+                    row.getWarehouseName(),
+                    row.getStatus(),
+                    row.getTotalQty(),
+                    row.getRemark(),
+                    row.getCreateBy(),
+                    row.getCreateTime());
+        }
+
+        var wh = warehouseRepository.findByIdAndDeleted(bill.getWarehouseId(), 0)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "warehouse not found"));
+        if (wh.getStatus() != null && wh.getStatus() != 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "warehouse disabled");
+        }
+
+        List<WmsIoBillDetail> details = billDetailRepository.findByBillId(bill.getId());
+        if (details.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill has no details");
+        }
+
+        // Validate all lines before any stock changes.
+        Set<Long> seen = new HashSet<>();
+        for (WmsIoBillDetail d : details) {
+            if (!seen.add(d.getProductId())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "duplicate productId on bill: " + d.getProductId());
+            }
+            if (d.getRealQty() != null && d.getRealQty().compareTo(BigDecimal.ZERO) > 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill detail already executed: " + d.getId());
+            }
+            BigDecimal qty = safeQty(d.getQty());
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid qty on bill detail: " + d.getId());
+            }
+            var p = productRepository.findByIdAndDeleted(d.getProductId(), 0)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "product not found: " + d.getProductId()));
+            if (p.getStatus() != null && p.getStatus() != 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "product disabled: " + d.getProductId());
+            }
+        }
+
+        for (WmsIoBillDetail d : details) {
+            BigDecimal qty = safeQty(d.getQty());
+            WmsStock stock = upsertIncreaseStockWithRetry(bill.getWarehouseId(), d.getProductId(), qty);
+
+            d.setRealQty(qty);
+            billDetailRepository.save(d);
+
+            WmsStockLog log = new WmsStockLog();
+            log.setWarehouseId(bill.getWarehouseId());
+            log.setProductId(d.getProductId());
+            log.setBizType("STOCK_IN");
+            log.setBizNo(bill.getBillNo());
+            log.setChangeQty(qty);
+            log.setAfterStockQty(safeQty(stock.getStockQty()));
+            log.setCreateTime(LocalDateTime.now());
+            stockLogRepository.save(log);
+        }
+
+        bill.setStatus(STATUS_COMPLETED);
+        billRepository.save(bill);
+
+        WmsIoBillRepository.BillRow row = billRepository.getBillRow(bill.getId());
+        return new StockInBillResponse(
+                row.getId(),
+                row.getBillNo(),
+                row.getWarehouseId(),
+                row.getWarehouseName(),
+                row.getStatus(),
+                row.getTotalQty(),
+                row.getRemark(),
+                row.getCreateBy(),
+                row.getCreateTime());
+    }
+
+    private WmsStock upsertIncreaseStockWithRetry(Long warehouseId, Long productId, BigDecimal qty) {
+        int attempts = 0;
+        while (true) {
+            attempts++;
+            try {
+                return upsertIncreaseStockOnce(warehouseId, productId, qty);
+            } catch (ObjectOptimisticLockingFailureException e) {
+                if (attempts >= 3) throw e;
+            }
+        }
+    }
+
+    private WmsStock upsertIncreaseStockOnce(Long warehouseId, Long productId, BigDecimal qty) {
+        LocalDateTime now = LocalDateTime.now();
+
+        WmsStock stock = stockRepository.findFirstByWarehouseIdAndProductId(warehouseId, productId).orElse(null);
+        if (stock == null) {
+            WmsStock created = new WmsStock();
+            created.setWarehouseId(warehouseId);
+            created.setProductId(productId);
+            created.setStockQty(qty);
+            created.setLockedQty(BigDecimal.ZERO);
+            created.setVersion(0);
+            created.setUpdateTime(now);
+            validateStockInvariant(created.getStockQty(), created.getLockedQty());
+            try {
+                return stockRepository.saveAndFlush(created);
+            } catch (DataIntegrityViolationException e) {
+                stock = stockRepository.findFirstByWarehouseIdAndProductId(warehouseId, productId)
+                        .orElseThrow(() -> e);
+            }
+        }
+
+        BigDecimal curStockQty = safeQty(stock.getStockQty());
+        BigDecimal lockedQty = safeQty(stock.getLockedQty());
+        validateStockInvariant(curStockQty, lockedQty);
+
+        BigDecimal nextStockQty = curStockQty.add(qty);
+        stock.setStockQty(nextStockQty);
+        stock.setLockedQty(lockedQty);
+        stock.setUpdateTime(now);
+        validateStockInvariant(stock.getStockQty(), stock.getLockedQty());
+        return stockRepository.saveAndFlush(stock);
+    }
+
+    private WmsStock deductStockWithRetry(Long warehouseId, Long productId, BigDecimal qty) {
+        int attempts = 0;
+        while (true) {
+            attempts++;
+            try {
+                return deductStockOnce(warehouseId, productId, qty);
+            } catch (ObjectOptimisticLockingFailureException e) {
+                if (attempts >= 3) throw e;
+            }
+        }
+    }
+
+    private WmsStock deductStockOnce(Long warehouseId, Long productId, BigDecimal qty) {
+        WmsStock stock = stockRepository.findFirstByWarehouseIdAndProductId(warehouseId, productId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "stock not found"));
+
+        BigDecimal stockQty = safeQty(stock.getStockQty());
+        BigDecimal lockedQty = safeQty(stock.getLockedQty());
+        validateStockInvariant(stockQty, lockedQty);
+        BigDecimal available = stockQty.subtract(lockedQty);
+        if (available.compareTo(qty) < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "insufficient stock (available=" + available + ", required=" + qty + ")");
+        }
+        BigDecimal nextStockQty = stockQty.subtract(qty);
+        stock.setStockQty(nextStockQty);
+        stock.setLockedQty(lockedQty);
+        stock.setUpdateTime(LocalDateTime.now());
+        validateStockInvariant(stock.getStockQty(), stock.getLockedQty());
+        return stockRepository.saveAndFlush(stock);
+    }
+
+    private static void validateLines(List<StockInBillLineRequest> lines) {
+        Set<Long> seen = new HashSet<>();
+        for (StockInBillLineRequest line : lines) {
+            if (line.productId() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productId is required");
+            }
+            if (line.qty() == null || line.qty().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "qty must be positive");
+            }
+            if (!seen.add(line.productId())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "duplicate productId: " + line.productId());
+            }
+        }
+    }
+
+    private static BigDecimal safeQty(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO : v;
+    }
+
+    private static void validateStockInvariant(BigDecimal stockQty, BigDecimal lockedQty) {
+        BigDecimal s = safeQty(stockQty);
+        BigDecimal l = safeQty(lockedQty);
+        if (s.compareTo(BigDecimal.ZERO) < 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "invalid stock state: stock_qty < 0");
+        }
+        if (l.compareTo(BigDecimal.ZERO) < 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "invalid stock state: locked_qty < 0");
+        }
+        if (l.compareTo(s) > 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "invalid stock state: locked_qty > stock_qty");
+        }
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) return null;
+        String s = value.trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    private static String generateBillNo() {
+        return generateBillNo("SI");
+    }
+
+    private static String generateBillNo(String prefix) {
+        String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        int rand = (int) (Math.random() * 9000) + 1000;
+        return prefix + ts + "-" + rand;
+    }
+}
