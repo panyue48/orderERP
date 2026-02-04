@@ -13,10 +13,25 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
 
 public interface WmsIoBillRepository extends JpaRepository<WmsIoBill, Long> {
+    /**
+     * 根据 bizId+type 查询关联单据。
+     *
+     * <p>用于幂等语义：同一张原单（bizId）在同一 type 下只能生成一张关联单（例如：冲销单）。</p>
+     */
     Optional<WmsIoBill> findFirstByBizIdAndType(Long bizId, Integer type);
 
+    /**
+     * 根据 bizNo+type 查询关联单据。
+     *
+     * <p>用于盘点执行等场景：以盘点单号作为 bizNo，把生成的调整出入库单与盘点单建立可追溯关联。</p>
+     */
     Optional<WmsIoBill> findFirstByBizNoAndType(String bizNo, Integer type);
 
+    /**
+     * 按主键查询并加悲观写锁（for update）。
+     *
+     * <p>用于执行/冲销等关键写路径，避免并发重复处理同一张单据。</p>
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select b from WmsIoBill b where b.id = :id")
     Optional<WmsIoBill> findByIdForUpdate(@Param("id") Long id);

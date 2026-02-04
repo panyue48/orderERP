@@ -135,7 +135,7 @@ public class SysAdminUserService {
             return;
         }
 
-        // Validate role existence (avoid silent bad ids).
+        // 校验角色是否存在（避免静默写入无效 roleId）。
         Set<Long> existing = roleRepository.findAllById(roleIds).stream().map(SysRole::getId).collect(Collectors.toSet());
         List<Long> missing = roleIds.stream().filter(id -> !existing.contains(id)).toList();
         if (!missing.isEmpty()) {
@@ -156,7 +156,7 @@ public class SysAdminUserService {
         if (userIds.isEmpty()) {
             return Map.of();
         }
-        // N+1 safe for small page sizes, but we can still batch with per-user queries.
+        // 这里是 N+1 查询：分页很小时影响可控；如需优化可改为批量查询/一次 join。
         return userIds.stream().collect(Collectors.toMap(id -> id,
                 id -> userRoleRepository.findByUserId(id).stream().map(SysUserRole::getRoleId).toList()));
     }
@@ -209,4 +209,3 @@ public class SysAdminUserService {
                 .toList();
     }
 }
-

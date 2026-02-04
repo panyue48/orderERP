@@ -163,3 +163,61 @@ export async function listProductOptions(params?: { keyword?: string; limit?: nu
   const res = await http.get<ProductOption[]>('/api/base/products/options', { params })
   return res.data
 }
+
+export type WmsCheckBill = {
+  id: number
+  billNo: string
+  warehouseId: number
+  warehouseName?: string | null
+  status: number
+  remark?: string | null
+  createBy?: string | null
+  createTime?: string | null
+  executeTime?: string | null
+}
+
+export type WmsCheckBillItem = {
+  id: number
+  productId: number
+  productCode?: string | null
+  productName?: string | null
+  unit?: string | null
+  countedQty?: string | number | null
+  bookQty?: string | number | null
+  diffQty?: string | number | null
+}
+
+export type WmsCheckBillDetail = WmsCheckBill & { items: WmsCheckBillItem[] }
+
+export async function listCheckBills(params: { page: number; size: number; keyword?: string }) {
+  const res = await http.get<PageResponse<WmsCheckBill>>('/api/wms/check-bills', { params })
+  return res.data
+}
+
+export async function getCheckBill(id: number) {
+  const res = await http.get<WmsCheckBillDetail>(`/api/wms/check-bills/${id}`)
+  return res.data
+}
+
+export async function createCheckBill(payload: {
+  warehouseId: number
+  remark?: string
+  lines: { productId: number; countedQty: number }[]
+}) {
+  const res = await http.post<WmsCheckBill>('/api/wms/check-bills', payload)
+  return res.data
+}
+
+export type WmsCheckExecuteResponse = {
+  checkBillId: number
+  checkBillNo: string
+  stockInBillId?: number | null
+  stockInBillNo?: string | null
+  stockOutBillId?: number | null
+  stockOutBillNo?: string | null
+}
+
+export async function executeCheckBill(id: number) {
+  const res = await http.post<WmsCheckExecuteResponse>(`/api/wms/check-bills/${id}/execute`)
+  return res.data
+}

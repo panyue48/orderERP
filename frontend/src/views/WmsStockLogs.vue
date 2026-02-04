@@ -74,6 +74,7 @@ import { useAuthStore } from '../stores/auth'
 const bizTypeLabel = (bizType: string) => {
   if (bizType === 'STOCK_IN') return '盘点入库'
   if (bizType === 'STOCK_OUT') return '盘点出库'
+  if (bizType === 'PURCHASE_IN') return '采购入库'
   if (bizType === 'REVERSAL_IN') return '冲销入库'
   if (bizType === 'REVERSAL_OUT') return '冲销出库'
   return bizType

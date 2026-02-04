@@ -93,7 +93,7 @@ const saveProfile = async () => {
       phone: form.phone || undefined,
       avatar: form.avatar || undefined
     })
-    // keep header nickname in sync without forcing a re-login
+    // 不强制重新登录的情况下，让 Header 昵称即时同步。
     auth.user = { ...(auth.user as any), nickname: profile.nickname ?? null }
     if (auth.persistLogin) {
       localStorage.setItem('user', JSON.stringify(auth.user))

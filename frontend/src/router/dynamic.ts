@@ -21,6 +21,9 @@ const componentMap: Record<string, RouteComponent> = {
   'views/WmsStockInBills.vue': () => import('../views/WmsStockInBills.vue'),
   'views/WmsStockOutBills.vue': () => import('../views/WmsStockOutBills.vue'),
   'views/WmsStockLogs.vue': () => import('../views/WmsStockLogs.vue'),
+  'views/WmsCheckBills.vue': () => import('../views/WmsCheckBills.vue'),
+  'views/PurchaseOrders.vue': () => import('../views/PurchaseOrders.vue'),
+  'views/PurchaseInbounds.vue': () => import('../views/PurchaseInbounds.vue'),
   'views/Placeholder.vue': () => import('../views/Placeholder.vue')
 }
 
@@ -40,14 +43,14 @@ const toRelativeChildPath = (fullPath: string, parentFullPath: string) => {
   const full = normalizePath(fullPath)
   const parent = normalizePath(parentFullPath === '/' ? '' : parentFullPath)
 
-  // Root children: "/dashboard" -> "dashboard"
+  // 根级子路由："/dashboard" -> "dashboard"
   if (!parent) return full.replace(/^\//, '')
 
-  // Nested children: "/system/users" under "/system" -> "users"
+  // 嵌套子路由："/system/users" 挂在 "/system" 下 -> "users"
   const prefix = `${parent}/`
   if (full.startsWith(prefix)) return full.slice(prefix.length)
 
-  // Fallback: strip leading "/" to avoid registering an absolute child route.
+  // 兜底：去掉前导 "/"，避免把子路由注册成“绝对子路由”。
   return full.replace(/^\//, '')
 }
 
@@ -56,8 +59,8 @@ export function buildRoutes(menus: MenuRoute[], parentFullPath = ''): RouteRecor
     const hasChildren = Boolean(menu.children && menu.children.length > 0)
     const component = hasChildren && menu.component === 'RouteView' ? RouteView : resolveComponent(menu.component)
 
-    // Important: when adding routes under a parent ("Root"), child paths must be relative.
-    // Otherwise Vue Router treats them as absolute and nesting/layout behavior becomes inconsistent.
+    // 重要：在父路由（Root）下面动态加子路由时，child path 必须是相对路径；
+    // 否则 Vue Router 会当成绝对路径，嵌套/布局行为会变得不一致。
     const path = toRelativeChildPath(menu.path, parentFullPath)
 
     const route: RouteRecordRaw = {
@@ -68,8 +71,8 @@ export function buildRoutes(menus: MenuRoute[], parentFullPath = ''): RouteRecor
       children: hasChildren ? buildRoutes(menu.children ?? [], menu.path) : undefined
     }
 
-    // If a directory route gets visited directly (e.g. clicking submenu title), redirect to first child
-    // to avoid an "empty page" (RouteView with no matched children).
+    // 如果用户直接访问“目录型菜单”（例如点了子菜单组标题），重定向到第一个子路由，
+    // 避免出现“空页面”（RouteView 下没有任何匹配的 children）。
     if (hasChildren && menu.children && menu.children.length > 0) {
       route.redirect = normalizePath(menu.children[0].path)
     }

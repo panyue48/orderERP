@@ -37,12 +37,12 @@ router.beforeEach(async (to) => {
   if (auth.isAuthenticated && !auth.menusLoaded) {
     try {
       const menus = await auth.loadMenus()
-      // menus already stored in auth; keep `menus` only for readability
+      // menus 已经写入 auth，这里保留局部变量只是为了可读性。
       void menus
       ensureDynamicRoutes(auth)
-      // Important: do NOT spread `to` here.
-      // If the current match is NotFound (because routes weren't added yet),
-      // spreading keeps `name: 'NotFound'` and you'll stay on the placeholder page.
+      // 重要：这里不要对 `to` 做展开（spread）。
+      // 如果当前命中的是 NotFound（因为动态路由尚未注册），展开会把 `name:'NotFound'` 带过去，
+      // 导致你依然停留在占位页上。
       return { path: to.fullPath, replace: true }
     } catch (error) {
       auth.logout()

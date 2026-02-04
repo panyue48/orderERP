@@ -40,7 +40,7 @@ public class BaseExcelService {
     }
 
     public List<ProductExcelRow> exportProducts(String keyword) {
-        // Keep it simple for now: export all active rows matching keyword.
+        // 简化实现：导出所有未删除且匹配 keyword 的数据行。
         List<BaseProduct> items = productRepository.search(trimToNull(keyword),
                 org.springframework.data.domain.Pageable.unpaged()).getContent();
         Map<Long, String> categoryIdToCode = loadCategoryIdToCode();
@@ -73,7 +73,7 @@ public class BaseExcelService {
         Map<String, Long> categoryCodeToId = loadCategoryCodeToId();
         Map<String, Boolean> seen = new HashMap<>();
 
-        int rowNum = 1; // Excel header is row 1; data starts row 2. We'll report data row index as (rowNum+1).
+        int rowNum = 1; // Excel 表头是第 1 行，数据从第 2 行开始；这里用 (rowNum+1) 回报数据行号。
         for (ProductExcelRow r : rows) {
             rowNum++;
             String code = normalizeCode(r.getProductCode());
@@ -108,7 +108,7 @@ public class BaseExcelService {
                 p.setDeleted(0);
                 p.setCreateTime(LocalDateTime.now());
             } else if (p.getDeleted() != null && p.getDeleted() == 1) {
-                // Unique index prevents re-insert; treat as revive/update.
+                // 唯一索引不允许重复插入：把逻辑删除的数据当作“复活/更新”。
                 p.setDeleted(0);
             }
 

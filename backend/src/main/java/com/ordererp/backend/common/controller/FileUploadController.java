@@ -72,7 +72,7 @@ public class FileUploadController {
         }
         String ext = clean.substring(idx + 1).trim();
         if (ext.isEmpty()) return null;
-        // Keep it conservative for filesystem safety.
+        // 出于文件系统安全考虑，只保留安全字符（避免路径穿越/奇怪扩展名等问题）。
         return ext.replaceAll("[^A-Za-z0-9]", "");
     }
 

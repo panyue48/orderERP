@@ -16,7 +16,7 @@ public class UploadWebConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         Path dir = Paths.get(uploadDir).toAbsolutePath().normalize();
         String location = dir.toUri().toString();
-        // Spring's ResourceHandler expects directory locations to end with "/".
+        // Spring 的 ResourceHandler 对目录 location 有约束：必须以 "/" 结尾。
         if (!location.endsWith("/")) {
             location = location + "/";
         }

@@ -51,6 +51,7 @@ public class WmsStockLogController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime,
             HttpServletResponse response) throws IOException {
+        // 第三阶段工程化点：采用分页写出（流式）导出，避免一次性加载大数据量导致内存压力。
         ExcelHttpUtil.prepareXlsxResponse(response, "wms-stock-logs.xlsx");
 
         int page = 0;

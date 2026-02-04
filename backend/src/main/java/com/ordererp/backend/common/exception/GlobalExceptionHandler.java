@@ -19,8 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Make backend errors easier to diagnose from the frontend (especially for blob downloads like Excel).
- * We keep the payload small but always include a human-readable "message".
+ * 让前端更容易定位后端错误（尤其是 Excel 等 blob 下载接口）。
+ * 响应体保持精简，但始终包含可读的 "message" 字段，便于直接展示/排查。
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -49,7 +49,7 @@ public class GlobalExceptionHandler {
         try {
             if (e.getBody() != null) msg = e.getBody().getDetail();
         } catch (Exception ignored) {
-            // ignore
+            // 忽略：不同实现/不同版本的 body 读取可能抛异常，这里不影响整体错误返回
         }
         if (msg == null || msg.isBlank()) msg = e.getMessage();
         return ResponseEntity.status(status).body(body(status, msg, req));
@@ -57,7 +57,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleUnhandled(Exception e, HttpServletRequest req) {
-        // Keep stacktrace in backend logs; frontend gets a stable JSON "message".
+        // 详细堆栈只写入后端日志；前端只拿到稳定的 JSON "message"。
         log.error("Unhandled exception on {} {}", req.getMethod(), req.getRequestURI(), e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(body(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage(), req));

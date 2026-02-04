@@ -24,7 +24,7 @@ export const useAuthStore = defineStore('auth', {
   },
   actions: {
     initFromStorage() {
-      // Migration/guard: only auto-login if user explicitly enabled persistLogin.
+      // 兼容/保护：只有用户明确启用“保持登录”时才允许自动恢复登录态。
       if (!this.persistLogin) {
         localStorage.removeItem('token')
         localStorage.removeItem('user')
@@ -54,12 +54,12 @@ export const useAuthStore = defineStore('auth', {
         localStorage.setItem('token', data.token)
         localStorage.setItem('user', JSON.stringify(data.user))
       } else {
-        // Ensure a previous persistent session doesn't silently auto-login again.
+        // 避免之前的持久会话残留导致“静默自动登录”。
         localStorage.removeItem('token')
         localStorage.removeItem('user')
       }
 
-      // Load authorities for client-side gating (buttons, etc.)
+      // 加载权限点，用于前端按钮级权限控制（hasPerm 等）。
       await this.loadPerms()
     },
     async loadMenus() {

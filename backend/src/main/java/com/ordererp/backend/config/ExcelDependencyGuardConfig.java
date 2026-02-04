@@ -6,8 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Fail fast if the backend is started with an outdated/cached classpath that is missing EasyExcel.
- * Without this, the app may boot but "export/template/import" endpoints will throw at runtime (500).
+ * 如果后端在运行时 classpath 中缺少 EasyExcel（常见原因：依赖缓存/IDE 未刷新/使用了过期的 classpath），则在启动阶段直接失败（fail fast）。
+ * 否则应用可能“看起来能启动”，但导出/模板/导入等接口会在运行时抛异常（500），定位成本更高。
  */
 @Configuration
 public class ExcelDependencyGuardConfig {
@@ -27,4 +27,3 @@ public class ExcelDependencyGuardConfig {
         }
     }
 }
-

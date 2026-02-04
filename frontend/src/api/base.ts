@@ -46,7 +46,7 @@ export type BasePartner = {
   id: number
   partnerName: string
   partnerCode: string
-  type: number // 1 supplier, 2 customer
+  type: number // 1：供应商，2：客户
   contact?: string | null
   phone?: string | null
   email?: string | null

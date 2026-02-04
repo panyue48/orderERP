@@ -15,11 +15,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        // Use IPv4 loopback to avoid Windows/Node resolving localhost to IPv6 (::1) and intermittently failing.
+        // 使用 IPv4 回环地址，避免 Windows/Node 把 localhost 解析为 IPv6（::1）导致偶发连接失败。
         target: 'http://127.0.0.1:8080',
         changeOrigin: true
       },
-      // Static upload files served by backend (img tags won't carry Authorization headers).
+      // 后端提供的静态上传文件（img 标签不会携带 Authorization header，所以单独走静态资源路径）。
       '/uploads': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true

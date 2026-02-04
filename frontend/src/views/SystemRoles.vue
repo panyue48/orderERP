@@ -228,8 +228,8 @@ async function remove(row: AdminRole) {
 
 function buildMenuTree(menus: AdminMenu[]): TreeNode[] {
   const nodes = menus
-    // In sys_menu, function/button perms are stored as menu_type='F' and are usually marked visible=0.
-    // They should still appear in the role permission tree, otherwise admins can't assign button/export/reverse perms.
+    // 在 sys_menu 中，“功能/按钮权限点”通常以 menu_type='F' 存储，并且经常被标记为 visible=0（不显示在菜单上）。
+    // 但它们仍应出现在“角色权限树”里，否则管理员无法分配按钮/导出/冲销等权限点。
     .filter((m) => m.visible !== 0 || (m.menuType || '').toUpperCase() === 'F')
     .map((m) => ({
       id: m.id,
@@ -267,7 +267,7 @@ async function openPerms(row: AdminRole) {
 
 async function loadRoleMenus(role: AdminRole) {
   const ids = await getRoleMenus(role.id)
-  // Wait a tick for tree render; then set checked keys.
+  // 等一帧让 Tree 渲染完成后再设置勾选项，避免 setCheckedKeys 不生效。
   setTimeout(() => {
     treeRef.value?.setCheckedKeys(ids, false)
   }, 0)

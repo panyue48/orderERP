@@ -26,8 +26,8 @@ public class SysUserDetailsService implements UserDetailsService {
         SysUser user = userRepository.findByUsernameAndDeleted(username, 0)
                 .orElseThrow(() -> new UsernameNotFoundException("用户不存在"));
         boolean enabled = user.getStatus() != null && user.getStatus() == 1;
-        // Compatible with legacy seed data (e.g. erp_data.sql) where password might be stored as plain "123456".
-        // Spring Security's DelegatingPasswordEncoder expects an id prefix like "{noop}" / "{bcrypt}".
+        // 兼容旧的初始化数据（例如 erp_data.sql）：密码可能以明文 "123456" 的形式存储。
+        // Spring Security 的 DelegatingPasswordEncoder 期望密码以 "{noop}" / "{bcrypt}" 等前缀声明算法。
         String storedPassword = user.getPassword();
         if (storedPassword != null && !storedPassword.startsWith("{")) {
             storedPassword = "{noop}" + storedPassword;

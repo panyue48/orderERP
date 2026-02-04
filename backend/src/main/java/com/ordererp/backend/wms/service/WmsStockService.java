@@ -44,6 +44,7 @@ public class WmsStockService {
     }
 
     public WmsStockExcelRow toExcelRow(WmsStockResponse r) {
+        // 导出 Excel 行：Controller 采用分页写出（流式）导出时，会按页把查询结果转换为 Excel 行。
         WmsStockExcelRow row = new WmsStockExcelRow();
         row.setWarehouseName(r.warehouseName());
         row.setProductCode(r.productCode());

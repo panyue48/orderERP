@@ -9,7 +9,7 @@ export type ImportResult = {
 }
 
 async function downloadBlob(url: string, filename: string, params?: any) {
-  // We intentionally handle non-2xx here so we can decode JSON error responses (which come back as Blob).
+  // 这里故意不让 axios 直接抛非 2xx 异常：这样才能读取 Blob 并解析后端返回的 JSON 错误信息。
   const res = await http.get(url, {
     params,
     responseType: 'blob',
@@ -23,7 +23,7 @@ async function downloadBlob(url: string, filename: string, params?: any) {
     let message = `HTTP ${status}`
     if (res.data instanceof Blob) {
       const text = await res.data.text().catch(() => '')
-      // Spring Boot default error JSON contains "error"/"message"/"path" fields.
+      // Spring Boot 默认错误 JSON 一般包含 "error"/"message"/"path" 等字段。
       try {
         const json = JSON.parse(text)
         message =
@@ -35,7 +35,7 @@ async function downloadBlob(url: string, filename: string, params?: any) {
     throw new Error(message)
   }
 
-  // If backend returns JSON (misconfigured route or auth), avoid triggering a bogus download.
+  // 如果后端返回的是 JSON（路由/鉴权异常等），就不要触发一个“伪下载”。
   if (contentType.includes('application/json') && res.data instanceof Blob) {
     const text = await res.data.text().catch(() => '')
     throw new Error(text || '下载失败')
@@ -48,8 +48,7 @@ async function downloadBlob(url: string, filename: string, params?: any) {
   a.download = filename
   document.body.appendChild(a)
   a.click()
-  // Revoke too early can cause some browsers to show "failed" in the download bar.
-  // Delay revocation to ensure the download has started.
+  // 过早 revoke 可能导致部分浏览器下载栏显示“失败”；延迟 revoke，确保下载已开始。
   window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000)
   a.remove()
 }

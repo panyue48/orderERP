@@ -51,7 +51,7 @@ public class BaseProductService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productCode already exists");
         }
 
-        // If a record exists but is logically deleted, revive it (unique key prevents re-insert).
+        // 如果存在同 productCode 但被逻辑删除的记录，则“复活”该记录（唯一键不允许直接重新插入）。
         BaseProduct p = existing != null ? existing : new BaseProduct();
         if (p.getId() == null) {
             p.setCreateTime(LocalDateTime.now());

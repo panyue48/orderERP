@@ -57,16 +57,16 @@ public class DatabaseGuardConfig {
     }
 
     private static String safeCurrentDatabase(Connection conn) {
-        // MySQL: DATABASE()
+        // MySQL：select database()
         try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery("select database()")) {
             if (rs.next()) {
                 return rs.getString(1);
             }
         } catch (Exception ignored) {
-            // fall back below
+            // 忽略异常，走后续兜底
         }
 
-        // Generic fallback
+        // 通用兜底：使用 JDBC catalog
         try {
             return conn.getCatalog();
         } catch (Exception ignored) {

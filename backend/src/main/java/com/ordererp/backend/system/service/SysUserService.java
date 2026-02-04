@@ -33,7 +33,7 @@ public class SysUserService {
         SysUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "用户不存在"));
 
-        // Allow partial updates: null means "no change".
+        // 允许部分更新：传 null 表示“不修改该字段”。
         if (request.nickname() != null) {
             user.setNickname(trimToNull(request.nickname()));
         }
@@ -89,4 +89,3 @@ public class SysUserService {
         return s.isEmpty() ? null : s;
     }
 }
-

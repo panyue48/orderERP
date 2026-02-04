@@ -106,7 +106,7 @@ public class SysAdminRoleService {
     }
 
     public List<Long> getRoleMenuIds(Long roleId) {
-        // Validate role exists
+        // 校验角色存在（避免对不存在/已删除角色操作）。
         SysRole role = roleRepository.findById(roleId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "角色不存在"));
         if (role.getDeleted() != null && role.getDeleted() == 1) {
@@ -117,7 +117,7 @@ public class SysAdminRoleService {
 
     @Transactional
     public void updateRoleMenus(Long roleId, RoleMenuUpdateRequest request) {
-        // Validate role exists
+        // 校验角色存在（避免对不存在/已删除角色操作）。
         SysRole role = roleRepository.findById(roleId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "角色不存在"));
         if (role.getDeleted() != null && role.getDeleted() == 1) {
@@ -184,4 +184,3 @@ public class SysAdminRoleService {
                 .toList();
     }
 }
-

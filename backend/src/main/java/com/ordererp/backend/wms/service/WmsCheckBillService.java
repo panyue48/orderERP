@@ -113,6 +113,15 @@ public class WmsCheckBillService {
                 items);
     }
 
+    /**
+     * 创建盘点单（counted_qty 实盘数量）。
+     *
+     * <p>第三阶段关键实现点（工程化与健壮性）：</p>
+     * <ul>
+     *   <li><b>模型升级</b>：每行保存实盘数量（counted_qty），执行时再计算账面数量（book_qty）与差异（diff_qty）。</li>
+     *   <li><b>前置校验</b>：先校验仓库/商品有效，再落库，避免产生“半成品盘点单”。</li>
+     * </ul>
+     */
     @Transactional
     public WmsCheckBillResponse create(WmsCheckBillCreateRequest request, String createdBy) {
         if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "request is required");
@@ -128,7 +137,7 @@ public class WmsCheckBillService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "warehouse disabled");
         }
 
-        // Validate products exist + enabled before persisting any data.
+        // 先校验商品存在且启用，再落库（避免产生“部分有效、部分无效”的盘点单）。
         for (WmsCheckBillLineRequest line : request.lines()) {
             var p = productRepository.findByIdAndDeleted(line.productId(), 0)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "product not found: " + line.productId()));
@@ -169,6 +178,16 @@ public class WmsCheckBillService {
                 row.getExecuteTime());
     }
 
+    /**
+     * 执行盘点单：根据 “实盘 - 账面” 差异生成调整，并写入库存流水。
+     *
+     * <p>第三阶段关键实现点（工程化与健壮性）：</p>
+     * <ul>
+     *   <li><b>幂等</b>：重复执行同一张盘点单，返回同一组调整单（不重复改库存、不重复写流水）。</li>
+     *   <li><b>并发</b>：对盘点单加悲观锁（for update），避免并发执行导致重复调整。</li>
+     *   <li><b>一致性</b>：先计算差异并校验扣减是否足够，再进行任何库存写入，避免部分写入。</li>
+     * </ul>
+     */
     @Transactional
     public WmsCheckExecuteResponse execute(Long id, String createdBy) {
         WmsCheckBill bill = checkBillRepository.findByIdForUpdate(id)
@@ -200,7 +219,7 @@ public class WmsCheckBillService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "check bill has no details");
         }
 
-        // Validate products exist + enabled before applying any stock changes.
+        // 在做任何库存变更前，先校验商品存在且启用。
         Set<Long> seen = new HashSet<>();
         for (WmsCheckBillDetail d : details) {
             if (!seen.add(d.getProductId())) {
@@ -216,7 +235,7 @@ public class WmsCheckBillService {
             }
         }
 
-        // Compute diffs first + validate deductions against available stock (avoid partial writes).
+        // 先计算差异并校验扣减是否足够（避免“部分库存已改，但中途失败”）。
         List<DiffLine> diffs = new ArrayList<>();
         for (WmsCheckBillDetail d : details) {
             WmsStock stock = stockRepository.findFirstByWarehouseIdAndProductId(bill.getWarehouseId(), d.getProductId()).orElse(null);
@@ -239,7 +258,7 @@ public class WmsCheckBillService {
             }
         }
 
-        // Create adjustment bills (optional) for traceability.
+        // 生成调整单（可选）：把“盘点调整”落到出入库单上，便于审计与追溯。
         WmsIoBill inBill = null;
         WmsIoBill outBill = null;
         List<DiffLine> inLines = diffs.stream().filter(x -> x.diff.compareTo(BigDecimal.ZERO) > 0).toList();
@@ -254,7 +273,7 @@ public class WmsCheckBillService {
             inBill.setType(BILL_TYPE_STOCK_IN);
             inBill.setWarehouseId(bill.getWarehouseId());
             inBill.setStatus(STATUS_COMPLETED);
-            inBill.setBizNo(bill.getBillNo()); // link to check bill (do not reuse biz_id to avoid reversal ambiguity)
+            inBill.setBizNo(bill.getBillNo()); // 关联盘点单（避免复用 biz_id 导致冲销语义混淆）
             inBill.setRemark("盘点调整入库（来源盘点单）: " + bill.getBillNo());
             inBill.setCreateBy(createdBy0);
             inBill.setCreateTime(now);
@@ -273,7 +292,7 @@ public class WmsCheckBillService {
             outBill = ioBillRepository.save(outBill);
         }
 
-        // Apply adjustments + write logs.
+        // 应用库存调整并写入流水。
         for (DiffLine x : diffs) {
             x.detail.setBookQty(x.bookQty);
             x.detail.setDiffQty(x.diff);
@@ -459,4 +478,3 @@ public class WmsCheckBillService {
     private record DiffLine(WmsCheckBillDetail detail, BigDecimal bookQty, BigDecimal diff) {
     }
 }
-

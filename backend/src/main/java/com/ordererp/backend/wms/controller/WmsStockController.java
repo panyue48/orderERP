@@ -43,6 +43,7 @@ public class WmsStockController {
     public void export(@RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long warehouseId,
             HttpServletResponse response) throws IOException {
+        // 第三阶段工程化点：采用分页写出（流式）导出，避免一次性把大量数据加载到内存导致 OOM。
         ExcelHttpUtil.prepareXlsxResponse(response, "wms-stocks.xlsx");
 
         int page = 0;

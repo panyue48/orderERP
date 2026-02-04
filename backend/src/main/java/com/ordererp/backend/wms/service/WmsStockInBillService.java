@@ -174,6 +174,16 @@ public class WmsStockInBillService {
         return new WmsBillPrecheckResponse(ok, message, lines);
     }
 
+    /**
+     * 入库单冲销（反冲）。
+     *
+     * <p>第三阶段关键实现点（工程化与健壮性）：</p>
+     * <ul>
+     *   <li><b>幂等</b>：重复调用 reverse 必须返回同一张冲销单，不能重复扣库存/重复写流水。</li>
+     *   <li><b>并发</b>：对原始单据加悲观锁（for update），并依赖数据库唯一约束 (biz_id, type) 只生成一张冲销单；
+     *       若并发撞唯一键，则读取并返回已存在的冲销单作为兜底。</li>
+     * </ul>
+     */
     @Transactional
     public WmsReverseResponse reverse(Long id, String createdBy) {
         WmsIoBill bill = billRepository.findByIdForUpdate(id)
@@ -198,7 +208,7 @@ public class WmsStockInBillService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill has no details");
         }
 
-        // Reversal of stock-in means deduct stock (stock-out). Ensure enough available stock.
+        // 入库单冲销等价于“出库扣减”：必须确保可用库存充足。
         for (WmsIoBillDetail d : details) {
             BigDecimal qty = safeQty(d.getRealQty());
             if (qty.compareTo(BigDecimal.ZERO) <= 0) {
@@ -231,7 +241,7 @@ public class WmsStockInBillService {
         try {
             reversal = billRepository.saveAndFlush(reversal);
         } catch (DataIntegrityViolationException e) {
-            // Unique(biz_id, type) hit under concurrent reversals: return existing record (idempotent).
+            // 并发下命中 Unique(biz_id, type)：说明已有冲销单，按幂等语义返回 existing。
             existing = billRepository.findFirstByBizIdAndType(bill.getId(), BILL_TYPE_STOCK_OUT).orElse(null);
             if (existing != null) {
                 return new WmsReverseResponse(existing.getId(), existing.getBillNo());
@@ -313,6 +323,16 @@ public class WmsStockInBillService {
                 row.getCreateTime());
     }
 
+    /**
+     * 执行入库单。
+     *
+     * <p>第三阶段关键实现点（工程化与健壮性）：</p>
+     * <ul>
+     *   <li><b>幂等</b>：已完成的单据再次执行，直接返回“已完成”结果，不重复写入库存与流水。</li>
+     *   <li><b>并发</b>：对单据加悲观锁（for update），避免同一张单被并发执行导致重复入库。</li>
+     *   <li><b>一致性</b>：执行过程中持续校验库存不变量（stock_qty/locked_qty），发现异常立即中断。</li>
+     * </ul>
+     */
     @Transactional
     public StockInBillResponse execute(Long id) {
         WmsIoBill bill = billRepository.findByIdForUpdate(id)
@@ -345,7 +365,7 @@ public class WmsStockInBillService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bill has no details");
         }
 
-        // Validate all lines before any stock changes.
+        // 先校验所有明细，再做任何库存变更（避免“部分成功、部分失败”）。
         Set<Long> seen = new HashSet<>();
         for (WmsIoBillDetail d : details) {
             if (!seen.add(d.getProductId())) {

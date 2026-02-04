@@ -56,7 +56,7 @@ onMounted(() => {
     if (u) form.username = u
     if (p) form.password = p
   } else {
-    // Dev-friendly default when not remembering.
+    // 开发期友好默认值：未勾选“记住密码”时，自动填充默认密码方便调试。
     form.password = '123456'
   }
 })

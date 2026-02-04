@@ -80,6 +80,27 @@
          2. 更新 `wms_stock`：`stock_qty = stock_qty + qty`。
          3. 记录 `wms_stock_log`。
          4. 回写采购单状态 `status = 4 (已完成)`。
+
+    **以当前工程实现为准（Stage 4 已落地）**：
+
+    - 后端模块：`com.ordererp.backend.purchase`
+    - 数据表：`pur_order`、`pur_order_detail`（Flyway：`V15__purchase_core.sql`）
+    - 权限点：
+      - `pur:order:view` 查看
+      - `pur:order:add` 新建
+      - `pur:order:audit` 审核
+      - `pur:order:inbound` 入库
+      - `pur:order:cancel` 作废
+    - 接口：
+      - `GET /api/purchase/orders` 列表
+      - `GET /api/purchase/orders/{id}` 详情
+      - `POST /api/purchase/orders` 新建
+      - `POST /api/purchase/orders/{id}/audit` 审核
+      - `POST /api/purchase/orders/{id}/inbound` 入库（本阶段为“一键全量入库”，会生成采购入库 WMS 单并完成采购单）
+      - `POST /api/purchase/orders/{id}/cancel` 作废
+    - 与 WMS 的配合：
+      - 采购入库写入 `wms_io_bill.type=1`，并写库存流水 `wms_stock_log.biz_type='PURCHASE_IN'`
+      - 入库接口幂等：同一采购单只生成一张入库单，重复入库不会重复加库存/重复写流水
   
     ### 第五阶段：销售业务 (Sales) - **逻辑最复杂**
     

@@ -31,7 +31,7 @@ public class WmsCheckBillController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('wms:stockin:view')")
+    @PreAuthorize("hasAuthority('wms:check:view')")
     public PageResponse<WmsCheckBillResponse> page(@RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String keyword) {
@@ -41,13 +41,13 @@ public class WmsCheckBillController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('wms:stockin:view')")
+    @PreAuthorize("hasAuthority('wms:check:view')")
     public WmsCheckBillDetailResponse detail(@PathVariable Long id) {
         return checkBillService.detail(id);
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('wms:stockin:add')")
+    @PreAuthorize("hasAuthority('wms:check:add')")
     public WmsCheckBillResponse create(@Valid @RequestBody WmsCheckBillCreateRequest request,
             Authentication authentication) {
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
@@ -55,10 +55,10 @@ public class WmsCheckBillController {
     }
 
     @PostMapping("/{id}/execute")
-    @PreAuthorize("hasAuthority('wms:stockin:execute')")
+    @PreAuthorize("hasAuthority('wms:check:execute')")
     public WmsCheckExecuteResponse execute(@PathVariable Long id, Authentication authentication) {
+        // 第三阶段关键点：盘点执行为幂等操作（重复执行返回同一组调整单，不重复改库存）。
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
         return checkBillService.execute(id, user.getUsername());
     }
 }
-

@@ -36,8 +36,8 @@ const auth = useAuthStore()
 const activePath = computed(() => route.path)
 const title = computed(() => (route.meta?.title as string) || '')
 
-// In dev (HMR) or edge navigation cases, the router guard might not have loaded menus yet.
-// Ensure menus exist so the sidebar never appears empty unless the user truly has none.
+// 开发模式（HMR）或边界跳转场景下，路由守卫可能还没来得及加载菜单/权限。
+// 这里兜底确保侧边栏不会“短暂空白”（除非用户确实没有任何菜单权限）。
 watchEffect(() => {
   if (auth.isAuthenticated && !auth.menusLoaded) {
     auth.loadMenus().catch(() => auth.logout())

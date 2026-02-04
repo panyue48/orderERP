@@ -43,6 +43,7 @@ public class WmsStockLogService {
     }
 
     public static WmsStockLogExcelRow toExcelRow(WmsStockLogResponse r) {
+        // 导出 Excel 行：Controller 采用分页写出（流式）导出时，会按页把查询结果转换为 Excel 行。
         WmsStockLogExcelRow row = new WmsStockLogExcelRow();
         row.setCreateTime(r.createTime());
         row.setWarehouseName(r.warehouseName());

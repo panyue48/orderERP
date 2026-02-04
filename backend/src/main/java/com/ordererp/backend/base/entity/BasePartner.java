@@ -22,7 +22,7 @@ public class BasePartner {
     @Column(name = "partner_code", nullable = false, unique = true)
     private String partnerCode;
 
-    // 1 supplier, 2 customer
+    // 1：供应商，2：客户
     private Integer type;
 
     private String contact;
@@ -137,4 +137,3 @@ public class BasePartner {
         this.updateTime = updateTime;
     }
 }
-

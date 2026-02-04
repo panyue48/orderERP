@@ -14,9 +14,8 @@ public final class ExcelHttpUtil {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         String encoded = URLEncoder.encode(filename, StandardCharsets.UTF_8).replaceAll("\\+", "%20");
         response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encoded);
-        // Avoid caching by proxies.
+        // 避免被代理缓存（防止下载到旧文件）。
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("Pragma", "no-cache");
     }
 }
-
