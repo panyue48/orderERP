@@ -21,6 +21,7 @@ export type WmsStock = {
   unit?: string | null
   stockQty?: string | number | null
   lockedQty?: string | number | null
+  qcQty?: string | number | null
   availableQty?: string | number | null
   updateTime?: string | null
 }

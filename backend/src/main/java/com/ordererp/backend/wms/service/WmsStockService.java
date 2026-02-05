@@ -22,6 +22,7 @@ public class WmsStockService {
         return stockRepository.pageRows(keyword, warehouseId, pageable).map(r -> {
             BigDecimal stockQty = r.getStockQty() == null ? BigDecimal.ZERO : r.getStockQty();
             BigDecimal lockedQty = r.getLockedQty() == null ? BigDecimal.ZERO : r.getLockedQty();
+            BigDecimal qcQty = r.getQcQty() == null ? BigDecimal.ZERO : r.getQcQty();
             BigDecimal available = stockQty.subtract(lockedQty);
             return new WmsStockResponse(
                     r.getId(),
@@ -33,6 +34,7 @@ public class WmsStockService {
                     r.getUnit(),
                     stockQty,
                     lockedQty,
+                    qcQty,
                     available,
                     r.getUpdateTime());
         });
@@ -52,6 +54,7 @@ public class WmsStockService {
         row.setUnit(r.unit());
         row.setStockQty(r.stockQty());
         row.setLockedQty(r.lockedQty());
+        row.setQcQty(r.qcQty());
         row.setAvailableQty(r.availableQty());
         row.setUpdateTime(r.updateTime());
         return row;

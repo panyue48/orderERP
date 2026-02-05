@@ -32,6 +32,7 @@
       <el-table-column prop="productName" label="商品名称" min-width="220" />
       <el-table-column prop="unit" label="单位" width="80" />
       <el-table-column prop="stockQty" label="物理库存" width="120" />
+      <el-table-column prop="qcQty" label="待质检" width="120" />
       <el-table-column prop="lockedQty" label="锁定库存" width="120" />
       <el-table-column prop="availableQty" label="可用库存" width="120" />
       <el-table-column prop="updateTime" label="更新时间" width="180" />

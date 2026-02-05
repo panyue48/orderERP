@@ -14,6 +14,10 @@ public record PurInboundResponse(
         Long warehouseId,
         String warehouseName,
         Integer status,
+        Integer qcStatus,
+        String qcBy,
+        LocalDateTime qcTime,
+        String qcRemark,
         Long wmsBillId,
         String wmsBillNo,
         String remark,
@@ -22,4 +26,3 @@ public record PurInboundResponse(
         String executeBy,
         LocalDateTime executeTime) {
 }
-

@@ -7,11 +7,14 @@ import com.ordererp.backend.purchase.dto.PurInboundCreateRequest;
 import com.ordererp.backend.purchase.dto.PurInboundExecuteResponse;
 import com.ordererp.backend.purchase.dto.PurOrderInboundRequest;
 import com.ordererp.backend.purchase.dto.PurOrderInboundResponse;
+import com.ordererp.backend.purchase.dto.PurOrderOptionResponse;
 import com.ordererp.backend.purchase.dto.PurOrderResponse;
+import com.ordererp.backend.purchase.dto.PurPendingQcSummaryResponse;
 import com.ordererp.backend.purchase.service.PurInboundService;
 import com.ordererp.backend.purchase.service.PurOrderService;
 import com.ordererp.backend.system.security.SysUserDetails;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -52,6 +55,19 @@ public class PurOrderController {
         return orderService.detail(id);
     }
 
+    @GetMapping("/options")
+    @PreAuthorize("hasAuthority('pur:inbound:add')")
+    public List<PurOrderOptionResponse> options(@RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "50") int limit) {
+        return orderService.options(keyword, limit);
+    }
+
+    @GetMapping("/{id}/pending-qc-summary")
+    @PreAuthorize("hasAuthority('pur:inbound:add')")
+    public PurPendingQcSummaryResponse pendingQcSummary(@PathVariable Long id) {
+        return inboundService.pendingQcSummary(id);
+    }
+
     @PostMapping
     @PreAuthorize("hasAuthority('pur:order:add')")
     public PurOrderResponse create(@Valid @RequestBody PurOrderCreateRequest request, Authentication authentication) {
@@ -80,11 +96,11 @@ public class PurOrderController {
      * <p>与 legacy 的 /inbound 区别：/inbound 为“一键全量入库”，只适用于最小闭环；/inbounds 支持分批入库。</p>
      */
     @PostMapping("/{id}/inbounds")
-    @PreAuthorize("hasAuthority('pur:order:inbound')")
+    @PreAuthorize("hasAuthority('pur:inbound:add')")
     public PurInboundExecuteResponse batchInbound(@PathVariable Long id, @RequestBody PurInboundCreateRequest request,
             Authentication authentication) {
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
-        return inboundService.createAndExecuteFromOrder(id, request, user.getUsername());
+        return inboundService.createFromOrder(id, request, user.getUsername());
     }
 
     @PostMapping("/{id}/cancel")

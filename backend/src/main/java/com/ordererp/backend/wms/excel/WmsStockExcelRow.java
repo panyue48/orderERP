@@ -23,6 +23,9 @@ public class WmsStockExcelRow {
     @ExcelProperty("LockedQty")
     private BigDecimal lockedQty;
 
+    @ExcelProperty("QcQty")
+    private BigDecimal qcQty;
+
     @ExcelProperty("AvailableQty")
     private BigDecimal availableQty;
 
@@ -77,6 +80,14 @@ public class WmsStockExcelRow {
         this.lockedQty = lockedQty;
     }
 
+    public BigDecimal getQcQty() {
+        return qcQty;
+    }
+
+    public void setQcQty(BigDecimal qcQty) {
+        this.qcQty = qcQty;
+    }
+
     public BigDecimal getAvailableQty() {
         return availableQty;
     }
@@ -93,4 +104,3 @@ public class WmsStockExcelRow {
         this.updateTime = updateTime;
     }
 }
-

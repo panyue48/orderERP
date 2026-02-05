@@ -77,6 +77,27 @@ public interface PurOrderRepository extends JpaRepository<PurOrder, Long> {
             nativeQuery = true)
     PurOrderRow getRow(@Param("id") Long id);
 
+    @Query(value = """
+            select
+              o.id as id,
+              o.order_no as orderNo,
+              o.supplier_id as supplierId,
+              p.partner_code as supplierCode,
+              p.partner_name as supplierName,
+              o.order_date as orderDate,
+              o.status as status
+            from pur_order o
+            left join base_partner p on p.id = o.supplier_id
+            where o.status in (2, 3)
+              and (:kw is null or :kw = ''
+                   or lower(o.order_no) like lower(concat('%', :kw, '%'))
+                   or lower(p.partner_code) like lower(concat('%', :kw, '%'))
+                   or lower(p.partner_name) like lower(concat('%', :kw, '%')))
+            order by o.id desc
+            limit :limit
+            """, nativeQuery = true)
+    java.util.List<PurOrderOptionRow> optionRows(@Param("kw") String keyword, @Param("limit") int limit);
+
     interface PurOrderRow {
         Long getId();
 
@@ -106,5 +127,20 @@ public interface PurOrderRepository extends JpaRepository<PurOrder, Long> {
 
         LocalDateTime getAuditTime();
     }
-}
 
+    interface PurOrderOptionRow {
+        Long getId();
+
+        String getOrderNo();
+
+        Long getSupplierId();
+
+        String getSupplierCode();
+
+        String getSupplierName();
+
+        LocalDate getOrderDate();
+
+        Integer getStatus();
+    }
+}

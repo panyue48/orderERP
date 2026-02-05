@@ -12,6 +12,7 @@ import com.ordererp.backend.purchase.dto.PurOrderInboundRequest;
 import com.ordererp.backend.purchase.dto.PurOrderInboundResponse;
 import com.ordererp.backend.purchase.dto.PurOrderItemResponse;
 import com.ordererp.backend.purchase.dto.PurOrderLineRequest;
+import com.ordererp.backend.purchase.dto.PurOrderOptionResponse;
 import com.ordererp.backend.purchase.dto.PurOrderResponse;
 import com.ordererp.backend.purchase.entity.PurOrder;
 import com.ordererp.backend.purchase.entity.PurOrderDetail;
@@ -82,6 +83,20 @@ public class PurOrderService {
 
     public Page<PurOrderResponse> page(String keyword, Pageable pageable) {
         return orderRepository.pageRows(trimToNull(keyword), pageable).map(PurOrderService::toResponse);
+    }
+
+    public List<PurOrderOptionResponse> options(String keyword, Integer limit) {
+        int lim = limit == null ? 50 : Math.max(1, Math.min(limit, 500));
+        return orderRepository.optionRows(trimToNull(keyword), lim).stream()
+                .map(r -> new PurOrderOptionResponse(
+                        r.getId(),
+                        r.getOrderNo(),
+                        r.getSupplierId(),
+                        r.getSupplierCode(),
+                        r.getSupplierName(),
+                        r.getOrderDate(),
+                        r.getStatus()))
+                .toList();
     }
 
     public PurOrderDetailResponse detail(Long id) {

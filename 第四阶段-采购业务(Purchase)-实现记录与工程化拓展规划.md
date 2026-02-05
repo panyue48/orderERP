@@ -52,6 +52,16 @@
   - 建表：`pur_inbound`、`pur_inbound_detail`
   - 菜单与权限种子：采购管理 -> 采购入库单
 
+- 迁移文件：`backend/src/main/resources/db/migration/V20__purchase_inbound_iqc.sql`
+- 内容：
+  - 为 `pur_inbound` 增加质检字段（`qc_status/qc_by/qc_time/qc_remark`）
+  - 增加入库质检权限点：`pur:inbound:iqc`
+
+- 迁移文件：`backend/src/main/resources/db/migration/V17__purchase_return.sql`
+- 内容：
+  - 建表：`pur_return`、`pur_return_detail`
+  - 菜单与权限种子：采购管理 -> 采购退货单
+
 ### 2.2 表结构（与 erp_data.sql 对齐）
 
 - `pur_order`
@@ -69,10 +79,10 @@
 ### 3.1 模块位置
 
 - `backend/src/main/java/com/ordererp/backend/purchase`
-  - `entity/`：`PurOrder`、`PurOrderDetail`
-  - `repository/`：`PurOrderRepository`、`PurOrderDetailRepository`
-  - `service/`：`PurOrderService`
-  - `controller/`：`PurOrderController`
+  - `entity/`：`PurOrder*`、`PurInbound*`、`PurReturn*`
+  - `repository/`：`PurOrder*Repository`、`PurInbound*Repository`、`PurReturn*Repository`
+  - `service/`：`PurOrderService`、`PurInboundService`、`PurReturnService`
+  - `controller/`：`PurOrderController`、`PurInboundController`、`PurReturnController`
 
 ### 3.2 接口清单
 
@@ -90,8 +100,42 @@
 
 ### 3.2.1 采购入库单接口
 
-- 列表：`GET /api/purchase/inbounds`
+- 列表：`GET /api/purchase/inbounds`（支持按采购单过滤：`?orderId=123`）
 - 详情：`GET /api/purchase/inbounds/{id}`
+- 新建：`POST /api/purchase/inbounds`（新建采购入库，同时自动生成采购订单；默认进入“待质检”，不直接加库存）
+- 质检通过并入库：`POST /api/purchase/inbounds/{id}/iqc-pass`
+- 质检不合格：`POST /api/purchase/inbounds/{id}/iqc-reject`
+
+质检交互辅助接口（用于“新增收货批次”的选择与提示）：
+
+- 采购单下拉：`GET /api/purchase/orders/options`（仅返回可继续收货的采购单）
+- 待检汇总：`GET /api/purchase/orders/{id}/pending-qc-summary`（返回待检批次数量 + 待检数量汇总）
+
+### 3.2.2 采购退货单接口（P1 已落地）
+
+- 列表：`GET /api/purchase/returns`
+- 详情：`GET /api/purchase/returns/{id}`
+- 新建：`POST /api/purchase/returns`
+- 审核：`POST /api/purchase/returns/{id}/audit`
+- 执行：`POST /api/purchase/returns/{id}/execute`（生成 WMS 出库单并扣减库存）
+- 作废：`POST /api/purchase/returns/{id}/cancel`
+
+### 3.2.3 采购对账单接口（P1 已落地）
+
+对账对象：同一供应商在周期内的“已完成入库（质检通过）”与“已完成退货”，用于形成应付结算闭环。
+
+- 列表：`GET /api/purchase/ap-bills`
+- 详情：`GET /api/purchase/ap-bills/{id}`（包含：对账单据汇总 + 付款记录 + 发票记录）
+- 新建：`POST /api/purchase/ap-bills`
+  - 请求：`{ "supplierId": 1, "startDate": "2026-02-01", "endDate": "2026-02-29", "remark": "..." }`
+  - 说明：创建时自动汇总入库/退货并“占用单据”，避免重复进入其他对账单
+- 审核：`POST /api/purchase/ap-bills/{id}/audit`
+- 重新生成：`POST /api/purchase/ap-bills/{id}/regenerate`（仅草稿允许；审核后单据锁定）
+- 作废：`POST /api/purchase/ap-bills/{id}/cancel`（要求：未发生付款/开票）
+- 付款登记：`POST /api/purchase/ap-bills/{id}/payments`
+- 付款作废：`POST /api/purchase/ap-bills/{id}/payments/{paymentId}/cancel`
+- 发票登记：`POST /api/purchase/ap-bills/{id}/invoices`
+- 发票作废：`POST /api/purchase/ap-bills/{id}/invoices/{invoiceId}/cancel`
 
 ### 3.3 权限点（sys_menu.perms）
 
@@ -108,9 +152,14 @@
 - admin（role_id=1）：全量权限
 - sale_mgr（role_id=2）：只读
 
+补充（已落地）：
+- 采购入库单：`pur:inbound:view`
+- 采购入库质检：`pur:inbound:iqc`
+- 采购退货单：`pur:return:view/add/audit/execute/cancel`
+
 ### 3.4 与 WMS 的配合（关键点）
 
-采购入库会写入 WMS 的通用出入库表：
+采购入库（质检通过后）会写入 WMS 的通用出入库表：
 
 - `wms_io_bill.type=1`：采购入库（Purchase In）
 - `wms_io_bill.biz_no`：用于追溯关联（采购单号/入库单号）
@@ -118,8 +167,8 @@
 
 幂等策略（当前实现）：
 
-- 入库前查询 `wms_io_bill` 是否已存在 `findFirstByBizNoAndType(orderNo, 1)`
-- 若已存在：直接返回 existing，并确保采购单状态被回写为已完成（不重复写库存/流水）
+- 创建“收货批次单（待质检）”时：以 `pur_inbound.request_no` 做幂等键（同 requestNo 重复提交返回同一张批次单，不会重复累加待检库存）
+- 质检通过执行入库时：以 `pur_inbound.wms_bill_id/wms_bill_no` 判断是否已执行（已执行则幂等返回，不重复加库存/写流水）
 
 > 说明：`wms_io_bill` 在第三阶段引入了全表唯一索引 `unique(biz_id, type)`（用于冲销单幂等）。
 > 为避免不同业务表的 ID 在 biz_id 上发生碰撞，采购域不使用 `biz_id` 作为外部幂等键，改用 `biz_no`/采购域自身的 requestNo。
@@ -130,9 +179,11 @@
 
 ### 4.1 菜单路由
 
-- 菜单：`采购管理 -> 采购订单`
+- 菜单：`采购管理 -> 采购订单 / 采购入库单 / 采购退货单`
 - 组件映射：
   - 后端 sys_menu.component：`views/PurchaseOrders.vue`
+  - 后端 sys_menu.component：`views/PurchaseInbounds.vue`
+  - 后端 sys_menu.component：`views/PurchaseReturns.vue`
   - 前端路由映射：`frontend/src/router/dynamic.ts`
 
 ### 4.2 页面
@@ -140,16 +191,28 @@
 - 页面文件：`frontend/src/views/PurchaseOrders.vue`
 - 支持：
   - 列表/搜索/分页
-  - 新建采购单（选供应商、选商品、填单价数量）
-  - 审核
-  - 入库（选仓库 + 填本次入库数量，支持分批入库；默认填充剩余可入数量）
-  - 作废
   - 详情查看（含明细）
+  - 说明：该页面用于**查看采购订单记录**；具体入库操作在“采购入库单”中完成，退货操作在“采购退货单”中完成（详情弹窗提供“新增收货批次”跳转入口）
 
 ### 4.2.1 采购入库单页面
 
 - 页面文件：`frontend/src/views/PurchaseInbounds.vue`
 - 支持：列表/搜索/分页、详情查看（含明细）
+- 支持（P0 工程化）：
+  - 新建采购入库（自动生成采购订单）
+  - 新增收货批次（选择采购单 → 填本次到货数量 → 生成新的“待质检”批次）
+  - 关键约束：若同一采购单已存在待质检批次，新增时会弹窗提示待检批次数量与待检数量汇总，避免“越点越多”的误解
+
+### 4.2.2 采购退货单页面（P1 已落地）
+
+- 页面文件：`frontend/src/views/PurchaseReturns.vue`
+- 支持：列表/搜索/分页、新建/审核/执行/作废、详情查看（含明细）
+
+### 4.2.3 采购对账单页面（P1 已落地）
+
+- 页面文件：`frontend/src/views/PurchaseApBills.vue`
+- 支持：列表/搜索/分页、详情查看（含对账单据/付款/发票）
+- 支持：新建对账单、审核、登记付款/发票、作废（未发生付款/开票时）
 
 ### 4.3 前端 API
 
@@ -168,6 +231,8 @@
   - 审核状态流转
   - 入库生成 WMS 单 + 加库存 + 写流水
   - 入库幂等（重复入库不重复加库存/不重复写流水）
+- `backend/src/test/java/com/ordererp/backend/purchase/PurchaseStage4PartialInboundIT.java`：分批入库（2->3->4）
+- `backend/src/test/java/com/ordererp/backend/purchase/PurchaseStage4ReturnIT.java`：采购退货（扣库存 + PURCHASE_RETURN 流水 + 幂等）
 
 ---
 
@@ -176,11 +241,11 @@
 1) **入库已支持“分批入库”，但仍偏简化**
 
 - 当前已支持：分批到货、部分入库、订单进度回写
-- 仍缺少：收货差异（少到/多到）、补单/退货、质检（IQC）、对账/发票/付款等完整闭环
+- 仍缺少：收货差异（少到/多到）、补单、质检（IQC）、对账/发票/付款等完整闭环
 
-2) **采购模块功能较少**
+2) **采购模块仍偏轻量**
 
-- 当前仅有“采购订单”一个入口，缺少围绕采购的更多业务对象（收货单/退货/对账/付款/发票等）
+- 当前已具备：采购订单/采购入库单/采购退货单；仍缺少围绕采购的更多业务对象（对账/付款/发票、质检、差异处理等）
 
 ---
 
@@ -204,24 +269,85 @@
 - 复用第三阶段的“冲销”工程化方案，为 `wms_io_bill.type=1` 增加冲销入口与权限
 - 或在采购域内提供“入库单冲销”，内部调用 WMS 的出库/冲销逻辑
 
-### P1：采购退货（退供应商）
+### P1（已落地）：采购退货（退供应商）
 
-- 新增 `pur_return` / `pur_return_detail`
-- 执行退货时生成 WMS 出库单（`wms_io_bill.type=...`，可复用 type=2/4 或新增类型，需统一规划）
-- 同步写库存流水（例如 `PURCHASE_RETURN`）
+- 已落库：`pur_return / pur_return_detail`
+- 执行时生成 WMS 出库单：`wms_io_bill.type=2`（采购退货出库），`biz_no=pur_return.return_no` 做追溯
+- 库存流水：`wms_stock_log.biz_type='PURCHASE_RETURN'`（change_qty 为负）
+- 幂等：退货单加悲观锁；已完成重复执行直接返回已关联的 WMS 单，不重复扣库存
 
 ### P1：质检（IQC）与入库质检状态
 
-- 收货后进入“待质检”，质检通过才允许入库
-- 不合格可走退货或让步接收
+### P1（已落地）：质检（IQC）与入库质检状态
+
+#### 设计目标（为什么要这么做）
+
+- 贴近真实仓库：收货后通常先进入“待检区”，**未质检通过前不应计入可用库存**
+- 贴近用户心智：用户点击“新增收货批次”后，看到“待质检”数量增加，理解“货到了但库存没变”的原因
+- 避免误操作：同一采购单存在待检批次时，新增批次要有明确提示，避免“越点越多”的错觉
+
+#### 数据模型（落库点）
+
+- `pur_inbound` 增加 IQC 字段（Flyway：`V20__purchase_inbound_iqc.sql`）
+  - `qc_status/qc_by/qc_time/qc_remark`
+  - 入库单状态：`status=1 待质检 / 2 已完成 / 9 已作废`
+- 新增待检库存桶 `wms_stock_qc`（Flyway：`V21__wms_stock_qc.sql`）
+  - `qc_qty`：待质检数量（不参与可用库存计算）
+  - 用途：在“质检通过”前承接到货数量，质检通过后再转入 `wms_stock.stock_qty`
+  - 兼容历史：迁移脚本会把已有“待质检”的收货批次汇总回填到 `wms_stock_qc.qc_qty`
+
+#### 核心流程（后端事务内做什么）
+
+1) 新增收货批次 / 新建采购入库（都会生成一张 `pur_inbound`，状态=待质检）
+   - 写入 `pur_inbound/pur_inbound_detail`
+   - **不生成** `wms_io_bill`
+   - **不增加** `wms_stock.stock_qty`
+   - **增加** `wms_stock_qc.qc_qty += 本次到货量`
+
+2) 质检通过并入库：`POST /api/purchase/inbounds/{id}/iqc-pass`
+   - 将 `pur_inbound.qc_status=通过`，记录 `qc_by/qc_time/qc_remark`
+   - `wms_stock_qc.qc_qty -= 本批次数量`（待检 -> 可用）
+   - 生成 `wms_io_bill.type=1`（采购入库，`biz_no=入库单号`）+ 明细
+   - `wms_stock.stock_qty += 本批次数量`
+   - 写库存流水：`wms_stock_log.biz_type='PURCHASE_IN'`
+   - 回写：`pur_inbound.status=2 + wms_bill_no + execute_by/time`
+   - 回写采购单进度：采购明细 `in_qty += 本批次数量`，并将 `pur_order.status` 更新为 `部分入库/已完成`
+
+3) 质检不合格：`POST /api/purchase/inbounds/{id}/iqc-reject`
+   - 将 `pur_inbound.qc_status=不合格`，并作废 `pur_inbound.status=9`
+   - `wms_stock_qc.qc_qty -= 本批次数量`（不进入可用库存）
+   - 不生成 WMS 单、不写入 `PURCHASE_IN` 流水
+   - 退供应商的业务（出库/账务）仍应走“采购退货单”闭环
+
+#### 前端交互（采购入库单页的用户路径）
+
+- 入库单列表行内操作仅保留：`详情 / 质检通过 / 不合格`（都针对“这张批次单”）
+- “新增收货批次（继续入库）”入口移动到页面顶部按钮：先选 PO → 填本次到货数量 → 生成新的待检批次
+- 关键约束（防误解）：若同一 PO 已存在待检批次，提交新增时会弹窗提示：
+  - “当前已有 X 张待质检批次单，是否继续新增到货批次？”
+  - 并列出待检数量汇总（按商品汇总），让用户知道库存没变的原因与当前待检规模
+- PO 页面只读，但在 PO 详情弹窗提供“新增收货批次”的跳转入口（带出该 PO 并自动打开新增弹窗）
+
+#### 验收要点（你可以怎么观察它是否正确）
+
+- 新增收货批次后：`库存查询` 的 `待质检(qcQty)` 增加，`物理库存/可用库存` 不变
+- 点击“质检通过”后：`qcQty` 扣减，`物理库存/可用库存` 增加，并出现 `采购入库` 流水
+- 点击“不合格”后：`qcQty` 扣减，`物理库存/可用库存` 不变，批次单作废
 
 ### P1：采购对账/发票/付款（与财务模块联动）
 
-目标：采购完成后进入“对账 -> 付款 -> 已付/部分付”的资金闭环。
+### P1（已落地）：采购对账/发票/付款（应付闭环）
 
-- 对账单（供应商维度周期结算）
-- 发票登记（税额、发票号、开票日期）
-- 付款单（对接第六阶段的资金收付）
+目标：采购完成后进入“对账 -> 付款 -> 已付/部分付”的资金闭环（本阶段先实现采购域内的应付闭环，后续可对接第六阶段资金账户）。
+
+- 对账单：`pur_ap_bill / pur_ap_bill_detail`
+  - 创建时按供应商+周期汇总“已完成入库（质检通过）”与“已完成退货”单据
+  - 使用 `pur_ap_doc_ref` 做占用，避免同一入库/退货单据进入多个对账单
+  - 锁定规则：对账单审核后单据列表锁定，不允许再新增/变更单据；若需刷新周期内新增单据，只能在草稿阶段点击“重新生成”
+- 付款登记：`pur_ap_payment`
+  - 支持登记付款、作废付款（会回写对账单 `paid_amount`，并自动更新对账单状态：已审核/部分已付/已结清）
+- 发票登记：`pur_ap_invoice`
+  - 支持登记发票、作废发票（会回写对账单 `invoice_amount`）
 
 ### P2：工程化增强
 
@@ -236,10 +362,19 @@
 
 1) 使用 `admin/123456` 登录
 2) `基础资料 -> 往来单位`：确保存在 `type=1` 的供应商（没有就新建一个）
-3) `采购管理 -> 采购订单`：
-   - 新建采购单（选供应商 + 选商品 + 填单价/数量）
+3) `采购管理 -> 采购入库单`：
+   - 新建采购入库（选供应商 + 选仓库 + 选商品 + 填单价/采购数量/本次入库数量）
+   - 若分批到货：点击页面顶部“新增收货批次”，选择采购单并填写本次到货数量（若已有待检批次会弹窗提示）
+4) `采购管理 -> 采购订单`：
+   - 仅用于查看采购订单记录与明细（含已入库进度）
+4) `采购管理 -> 采购退货单`：
+   - 新建退货单（选供应商 + 选仓库 + 选商品 + 填单价/数量）
    - 审核
-   - 入库（选仓库）
-4) `库存管理 -> 库存查询/库存流水`：
-   - 库存应增加
-   - 流水应出现 `PURCHASE_IN`
+   - 执行（生成 WMS 出库单 type=2，并扣减库存，写入 PURCHASE_RETURN 流水）
+5) `库存管理 -> 库存查询/库存流水`：
+   - 新增收货批次后：`待质检` 会增加（`qcQty`），但 `物理库存/可用库存` 不变
+   - 点击“质检通过”后：`物理库存/可用库存` 增加，同时 `待质检` 扣减
+   - 流水应出现 `采购入库` / `采购退货`（显示中文类型）
+6) `采购管理 -> 采购对账单`：
+   - 新建对账单：选择供应商 + 对账周期（应自动汇总已完成入库/退货单据）
+   - 审核后登记付款/发票：对账单应显示“已付/未付、已开票”，并随登记作废自动更新状态

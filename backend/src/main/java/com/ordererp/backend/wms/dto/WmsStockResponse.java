@@ -13,7 +13,7 @@ public record WmsStockResponse(
         String unit,
         BigDecimal stockQty,
         BigDecimal lockedQty,
+        BigDecimal qcQty,
         BigDecimal availableQty,
         LocalDateTime updateTime) {
 }
-

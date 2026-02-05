@@ -24,8 +24,10 @@ public interface WmsStockRepository extends JpaRepository<WmsStock, Long> {
               p.unit as unit,
               s.stock_qty as stockQty,
               s.locked_qty as lockedQty,
+              q.qc_qty as qcQty,
               s.update_time as updateTime
             from wms_stock s
+            left join wms_stock_qc q on q.warehouse_id = s.warehouse_id and q.product_id = s.product_id
             left join base_warehouse w on w.id = s.warehouse_id
             left join base_product p on p.id = s.product_id
             where (:warehouseId is null or s.warehouse_id = :warehouseId)
@@ -39,6 +41,7 @@ public interface WmsStockRepository extends JpaRepository<WmsStock, Long> {
             countQuery = """
             select count(*)
             from wms_stock s
+            left join wms_stock_qc q on q.warehouse_id = s.warehouse_id and q.product_id = s.product_id
             left join base_warehouse w on w.id = s.warehouse_id
             left join base_product p on p.id = s.product_id
             where (:warehouseId is null or s.warehouse_id = :warehouseId)
@@ -70,7 +73,8 @@ public interface WmsStockRepository extends JpaRepository<WmsStock, Long> {
 
         BigDecimal getLockedQty();
 
+        BigDecimal getQcQty();
+
         LocalDateTime getUpdateTime();
     }
 }
-

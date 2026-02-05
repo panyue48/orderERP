@@ -94,28 +94,34 @@ class PurchaseStage4PartialInboundIT {
         var audited = orderService.audit(created.id(), "auditor");
         assertEquals(2, audited.status());
 
-        var inbound1 = inboundService.createAndExecuteFromOrder(created.id(), new PurInboundCreateRequest(
+        var inbound1 = inboundService.createFromOrder(created.id(), new PurInboundCreateRequest(
                 "REQ-TC-PI-1",
                 wh.getId(),
                 "batch-1",
                 List.of(new PurInboundCreateLineRequest(p.getId(), new BigDecimal("1.000")))), "operator");
         assertNotNull(inbound1.inboundId());
-        assertNotNull(inbound1.wmsBillNo());
-        assertEquals(3, inbound1.orderStatus());
+        assertEquals(2, inbound1.orderStatus());
+
+        var exec1 = inboundService.iqcPassAndExecute(inbound1.inboundId(), "pass", "qc");
+        assertNotNull(exec1.wmsBillNo());
+        assertEquals(3, exec1.orderStatus());
 
         var od1 = orderDetailRepository.findByOrderIdOrderByIdAsc(created.id()).get(0);
         assertTrue(od1.getInQty().compareTo(new BigDecimal("1.000")) == 0);
         WmsStock stock1 = stockRepository.findFirstByWarehouseIdAndProductId(wh.getId(), p.getId()).orElseThrow();
         assertTrue(stock1.getStockQty().compareTo(new BigDecimal("1.000")) == 0);
 
-        var inbound2 = inboundService.createAndExecuteFromOrder(created.id(), new PurInboundCreateRequest(
+        var inbound2 = inboundService.createFromOrder(created.id(), new PurInboundCreateRequest(
                 "REQ-TC-PI-2",
                 wh.getId(),
                 "batch-2",
                 List.of(new PurInboundCreateLineRequest(p.getId(), new BigDecimal("1.000")))), "operator");
         assertNotNull(inbound2.inboundId());
-        assertNotNull(inbound2.wmsBillNo());
-        assertEquals(4, inbound2.orderStatus());
+        assertEquals(3, inbound2.orderStatus());
+
+        var exec2 = inboundService.iqcPassAndExecute(inbound2.inboundId(), "pass", "qc");
+        assertNotNull(exec2.wmsBillNo());
+        assertEquals(4, exec2.orderStatus());
 
         var od2 = orderDetailRepository.findByOrderIdOrderByIdAsc(created.id()).get(0);
         assertTrue(od2.getInQty().compareTo(new BigDecimal("2.000")) == 0);
@@ -123,13 +129,13 @@ class PurchaseStage4PartialInboundIT {
         assertTrue(stock2.getStockQty().compareTo(new BigDecimal("2.000")) == 0);
 
         // same requestNo -> idempotent
-        var inbound2Retry = inboundService.createAndExecuteFromOrder(created.id(), new PurInboundCreateRequest(
+        var inbound2Retry = inboundService.createFromOrder(created.id(), new PurInboundCreateRequest(
                 "REQ-TC-PI-2",
                 wh.getId(),
                 "batch-2",
                 List.of(new PurInboundCreateLineRequest(p.getId(), new BigDecimal("1.000")))), "operator");
         assertEquals(inbound2.inboundId(), inbound2Retry.inboundId());
-        assertEquals(inbound2.wmsBillNo(), inbound2Retry.wmsBillNo());
+        assertEquals(inbound2.inboundNo(), inbound2Retry.inboundNo());
 
         WmsStock stock3 = stockRepository.findFirstByWarehouseIdAndProductId(wh.getId(), p.getId()).orElseThrow();
         assertTrue(stock3.getStockQty().compareTo(new BigDecimal("2.000")) == 0);
@@ -172,4 +178,3 @@ class PurchaseStage4PartialInboundIT {
         return productRepository.saveAndFlush(p);
     }
 }
-

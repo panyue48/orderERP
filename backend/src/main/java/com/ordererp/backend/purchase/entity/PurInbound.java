@@ -35,6 +35,18 @@ public class PurInbound {
 
     private Integer status;
 
+    @Column(name = "qc_status")
+    private Integer qcStatus;
+
+    @Column(name = "qc_by")
+    private String qcBy;
+
+    @Column(name = "qc_time")
+    private LocalDateTime qcTime;
+
+    @Column(name = "qc_remark")
+    private String qcRemark;
+
     @Column(name = "wms_bill_id")
     private Long wmsBillId;
 
@@ -119,6 +131,38 @@ public class PurInbound {
         this.status = status;
     }
 
+    public Integer getQcStatus() {
+        return qcStatus;
+    }
+
+    public void setQcStatus(Integer qcStatus) {
+        this.qcStatus = qcStatus;
+    }
+
+    public String getQcBy() {
+        return qcBy;
+    }
+
+    public void setQcBy(String qcBy) {
+        this.qcBy = qcBy;
+    }
+
+    public LocalDateTime getQcTime() {
+        return qcTime;
+    }
+
+    public void setQcTime(LocalDateTime qcTime) {
+        this.qcTime = qcTime;
+    }
+
+    public String getQcRemark() {
+        return qcRemark;
+    }
+
+    public void setQcRemark(String qcRemark) {
+        this.qcRemark = qcRemark;
+    }
+
     public Long getWmsBillId() {
         return wmsBillId;
     }
@@ -175,4 +219,3 @@ public class PurInbound {
         this.executeTime = executeTime;
     }
 }
-
