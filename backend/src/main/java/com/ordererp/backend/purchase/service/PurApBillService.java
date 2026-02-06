@@ -24,7 +24,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -79,7 +82,41 @@ public class PurApBillService {
         PurApBillRepository.PurApBillRow row = billRepository.getRow(id);
         if (row == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "对账单不存在");
 
-        List<PurApBillDocResponse> docs = billDetailRepository.listRows(id).stream()
+        List<PurApBillDetailRepository.PurApBillDetailRow> docRows = billDetailRepository.listRows(id);
+
+        List<Long> inboundDocIds = new ArrayList<>();
+        List<Long> returnDocIds = new ArrayList<>();
+        for (var d : docRows) {
+            if (d == null || d.getDocType() == null || d.getDocId() == null) continue;
+            if (Objects.equals(d.getDocType(), DOC_TYPE_INBOUND)) inboundDocIds.add(d.getDocId());
+            if (Objects.equals(d.getDocType(), DOC_TYPE_RETURN)) returnDocIds.add(d.getDocId());
+        }
+
+        Map<Long, String> inboundSummaryByDocId = new HashMap<>();
+        if (!inboundDocIds.isEmpty()) {
+            Map<Long, List<PurApBillDetailRepository.InboundDocItemRow>> grouped = new HashMap<>();
+            for (var it : billDetailRepository.inboundDocItems(inboundDocIds)) {
+                if (it == null || it.getDocId() == null) continue;
+                grouped.computeIfAbsent(it.getDocId(), k -> new ArrayList<>()).add(it);
+            }
+            for (var e : grouped.entrySet()) {
+                inboundSummaryByDocId.put(e.getKey(), buildItemSummaryInbound(e.getValue()));
+            }
+        }
+
+        Map<Long, String> returnSummaryByDocId = new HashMap<>();
+        if (!returnDocIds.isEmpty()) {
+            Map<Long, List<PurApBillDetailRepository.ReturnDocItemRow>> grouped = new HashMap<>();
+            for (var it : billDetailRepository.returnDocItems(returnDocIds)) {
+                if (it == null || it.getDocId() == null) continue;
+                grouped.computeIfAbsent(it.getDocId(), k -> new ArrayList<>()).add(it);
+            }
+            for (var e : grouped.entrySet()) {
+                returnSummaryByDocId.put(e.getKey(), buildItemSummaryReturn(e.getValue()));
+            }
+        }
+
+        List<PurApBillDocResponse> docs = docRows.stream()
                 .map(d -> new PurApBillDocResponse(
                         d.getId(),
                         d.getDocType(),
@@ -88,7 +125,10 @@ public class PurApBillService {
                         d.getOrderId(),
                         d.getOrderNo(),
                         d.getDocTime(),
-                        d.getAmount()))
+                        d.getAmount(),
+                        Objects.equals(d.getDocType(), DOC_TYPE_INBOUND)
+                                ? inboundSummaryByDocId.get(d.getDocId())
+                                : (Objects.equals(d.getDocType(), DOC_TYPE_RETURN) ? returnSummaryByDocId.get(d.getDocId()) : null)))
                 .toList();
 
         List<PurApPaymentResponse> payments = paymentRepository.listRows(id).stream()
@@ -644,6 +684,71 @@ public class PurApBillService {
                 i.getCreateTime(),
                 i.getCancelBy(),
                 i.getCancelTime());
+    }
+
+    private static String buildItemSummaryInbound(List<PurApBillDetailRepository.InboundDocItemRow> rows) {
+        if (rows == null || rows.isEmpty()) return null;
+        List<ItemSummary> items = new ArrayList<>();
+        for (var r : rows) {
+            if (r == null) continue;
+            String code = trimToNull(r.getProductCode());
+            String name = trimToNull(r.getProductName());
+            if (code == null && name == null) continue;
+            items.add(new ItemSummary(code, name, r.getQty()));
+        }
+        return buildItemSummary(items);
+    }
+
+    private static String buildItemSummaryReturn(List<PurApBillDetailRepository.ReturnDocItemRow> rows) {
+        if (rows == null || rows.isEmpty()) return null;
+        List<ItemSummary> items = new ArrayList<>();
+        for (var r : rows) {
+            if (r == null) continue;
+            String code = trimToNull(r.getProductCode());
+            String name = trimToNull(r.getProductName());
+            if (code == null && name == null) continue;
+            items.add(new ItemSummary(code, name, r.getQty()));
+        }
+        return buildItemSummary(items);
+    }
+
+    private static String buildItemSummary(List<ItemSummary> items) {
+        if (items == null || items.isEmpty()) return null;
+
+        int total = items.size();
+        int maxShow = 3;
+        StringBuilder sb = new StringBuilder();
+        int show = Math.min(maxShow, total);
+        for (int i = 0; i < show; i++) {
+            ItemSummary it = items.get(i);
+            if (it == null) continue;
+            if (sb.length() > 0) sb.append("，");
+
+            String name = it.name();
+            String code = it.code();
+            if (name != null && code != null) sb.append(name).append("(").append(code).append(")");
+            else if (name != null) sb.append(name);
+            else if (code != null) sb.append(code);
+            else sb.append("-");
+
+            sb.append("×").append(fmtQty(it.qty()));
+        }
+
+        if (total > maxShow) {
+            sb.append(" 等").append(total).append("项");
+        }
+
+        return sb.toString();
+    }
+
+    private static String fmtQty(BigDecimal qty) {
+        if (qty == null) return "0";
+        BigDecimal q = qty.stripTrailingZeros();
+        String s = q.toPlainString();
+        return "-0".equals(s) ? "0" : s;
+    }
+
+    private record ItemSummary(String code, String name, BigDecimal qty) {
     }
 
     private static String mergeRemark(String oldRemark, String append) {

@@ -146,6 +146,9 @@
         </el-table-column>
         <el-table-column prop="docNo" label="单据号" width="220" />
         <el-table-column prop="orderNo" label="采购单号" width="220" />
+        <el-table-column prop="productSummary" label="商品" min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.productSummary || '-' }}</template>
+        </el-table-column>
         <el-table-column prop="docTime" label="执行时间" width="180" />
         <el-table-column prop="amount" label="金额" width="140" />
       </el-table>

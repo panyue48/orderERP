@@ -6,7 +6,7 @@
         <div style="display: flex; gap: 8px; align-items: center">
           <el-input v-model="keyword" placeholder="搜索单号/供应商/WMS单号" style="width: 260px" clearable @keyup.enter="reload" />
           <el-button @click="reload">查询</el-button>
-          <el-button v-if="canAdd" type="primary" @click="openCreate">新建退货单</el-button>
+          <el-button v-if="canCreate" type="primary" @click="openCreate">新建退货单</el-button>
         </div>
       </div>
     </template>
@@ -17,7 +17,7 @@
       <el-table-column prop="returnDate" label="日期" width="120" />
       <el-table-column prop="supplierName" label="供应商" min-width="180" />
       <el-table-column prop="warehouseName" label="仓库" min-width="140" />
-      <el-table-column prop="totalAmount" label="总额" width="120" />
+      <el-table-column v-if="canPriceView" prop="totalAmount" label="总额" width="120" />
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-tag v-if="row.status === 4" type="success">已完成</el-tag>
@@ -135,9 +135,17 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="单价" width="160">
+        <el-table-column v-if="canPriceView" label="单价" width="160">
           <template #default="{ row }">
-            <el-input-number v-model="row.price" :min="0" :precision="2" :step="1" controls-position="right" style="width: 140px" />
+            <el-input-number
+              v-model="row.price"
+              :min="0"
+              :precision="2"
+              :step="1"
+              controls-position="right"
+              style="width: 140px"
+              :disabled="!canPriceEdit"
+            />
           </template>
         </el-table-column>
         <el-table-column label="数量" width="160">
@@ -145,7 +153,7 @@
             <el-input-number v-model="row.qty" :min="0" :precision="3" :step="1" controls-position="right" style="width: 140px" />
           </template>
         </el-table-column>
-        <el-table-column label="金额" width="140">
+        <el-table-column v-if="canPriceView" label="金额" width="140">
           <template #default="{ row }">
             {{ formatAmount((Number(row.price) || 0) * (Number(row.qty) || 0)) }}
           </template>
@@ -157,7 +165,7 @@
         </el-table-column>
       </el-table>
 
-      <div style="display: flex; justify-content: flex-end; margin-top: 10px; font-weight: 600">
+      <div v-if="canPriceView" style="display: flex; justify-content: flex-end; margin-top: 10px; font-weight: 600">
         合计：{{ formatAmount(totalAmount) }}
       </div>
     </el-form>
@@ -176,7 +184,7 @@
         <el-descriptions-item label="供应商">{{ detail.header.supplierName }}</el-descriptions-item>
         <el-descriptions-item label="仓库">{{ detail.header.warehouseName }}</el-descriptions-item>
         <el-descriptions-item label="日期">{{ detail.header.returnDate }}</el-descriptions-item>
-        <el-descriptions-item label="总额">{{ detail.header.totalAmount }}</el-descriptions-item>
+        <el-descriptions-item v-if="canPriceView" label="总额">{{ detail.header.totalAmount }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag v-if="detail.header.status === 4" type="success">已完成</el-tag>
           <el-tag v-else-if="detail.header.status === 2" type="info">已审核</el-tag>
@@ -197,9 +205,9 @@
         <el-table-column prop="productCode" label="SKU" width="160" />
         <el-table-column prop="productName" label="商品名称" min-width="240" />
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column prop="price" label="单价" width="120" />
+        <el-table-column v-if="canPriceView" prop="price" label="单价" width="120" />
         <el-table-column prop="qty" label="数量" width="120" />
-        <el-table-column prop="amount" label="金额" width="120" />
+        <el-table-column v-if="canPriceView" prop="amount" label="金额" width="120" />
       </el-table>
     </div>
   </el-dialog>
@@ -229,6 +237,9 @@ const canAdd = computed(() => auth.hasPerm('pur:return:add'))
 const canAudit = computed(() => auth.hasPerm('pur:return:audit'))
 const canExecute = computed(() => auth.hasPerm('pur:return:execute'))
 const canCancel = computed(() => auth.hasPerm('pur:return:cancel'))
+const canPriceView = computed(() => auth.hasPerm('pur:price:view') || auth.hasPerm('pur:price:edit'))
+const canPriceEdit = computed(() => auth.hasPerm('pur:price:edit'))
+const canCreate = computed(() => canAdd.value && canPriceEdit.value)
 
 const keyword = ref('')
 const loading = ref(false)
@@ -326,6 +337,10 @@ async function searchProducts(query: string) {
 }
 
 async function submitCreate() {
+  if (!canPriceEdit.value) {
+    ElMessage.error('无权限编辑单价，无法新建退货单')
+    return
+  }
   if (!createForm.value.supplierId) {
     ElMessage.warning('请选择供应商')
     return
@@ -434,4 +449,3 @@ onMounted(async () => {
   ])
 })
 </script>
-

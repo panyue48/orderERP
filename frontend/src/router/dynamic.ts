@@ -26,6 +26,10 @@ const componentMap: Record<string, RouteComponent> = {
   'views/PurchaseInbounds.vue': () => import('../views/PurchaseInbounds.vue'),
   'views/PurchaseReturns.vue': () => import('../views/PurchaseReturns.vue'),
   'views/PurchaseApBills.vue': () => import('../views/PurchaseApBills.vue'),
+  'views/SalesOrders.vue': () => import('../views/SalesOrders.vue'),
+  'views/SalesOutbounds.vue': () => import('../views/SalesOutbounds.vue'),
+  'views/SalesReturns.vue': () => import('../views/SalesReturns.vue'),
+  'views/SalesArBills.vue': () => import('../views/SalesArBills.vue'),
   'views/Placeholder.vue': () => import('../views/Placeholder.vue')
 }
 

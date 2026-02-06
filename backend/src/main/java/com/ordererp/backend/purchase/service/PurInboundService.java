@@ -13,11 +13,13 @@ import com.ordererp.backend.purchase.dto.PurInboundExecuteResponse;
 import com.ordererp.backend.purchase.dto.PurInboundItemResponse;
 import com.ordererp.backend.purchase.dto.PurInboundNewOrderLineRequest;
 import com.ordererp.backend.purchase.dto.PurInboundNewOrderRequest;
+import com.ordererp.backend.purchase.dto.PurInboundReverseResponse;
 import com.ordererp.backend.purchase.dto.PurInboundResponse;
 import com.ordererp.backend.purchase.entity.PurInbound;
 import com.ordererp.backend.purchase.entity.PurInboundDetail;
 import com.ordererp.backend.purchase.entity.PurOrder;
 import com.ordererp.backend.purchase.entity.PurOrderDetail;
+import com.ordererp.backend.purchase.repository.PurApDocRefRepository;
 import com.ordererp.backend.purchase.repository.PurInboundDetailRepository;
 import com.ordererp.backend.purchase.repository.PurInboundRepository;
 import com.ordererp.backend.purchase.repository.PurOrderDetailRepository;
@@ -60,6 +62,7 @@ public class PurInboundService {
 
     private static final int INBOUND_STATUS_PENDING_QC = 1;
     private static final int INBOUND_STATUS_COMPLETED = 2;
+    private static final int INBOUND_STATUS_REVERSED = 8;
     private static final int INBOUND_STATUS_CANCELED = 9;
 
     private static final int QC_STATUS_PENDING = 1;
@@ -67,12 +70,17 @@ public class PurInboundService {
     private static final int QC_STATUS_REJECTED = 3;
 
     private static final int WMS_BILL_TYPE_PURCHASE_IN = 1;
+    private static final int WMS_BILL_TYPE_STOCK_OUT = 4;
     private static final int WMS_BILL_STATUS_COMPLETED = 2;
+
+    private static final int DOC_TYPE_INBOUND = 1;
+    private static final int REVERSE_STATUS_REVERSED = 1;
 
     private final PurInboundRepository inboundRepository;
     private final PurInboundDetailRepository inboundDetailRepository;
     private final PurOrderRepository orderRepository;
     private final PurOrderDetailRepository orderDetailRepository;
+    private final PurApDocRefRepository docRefRepository;
     private final BasePartnerRepository partnerRepository;
     private final BaseWarehouseRepository warehouseRepository;
     private final BaseProductRepository productRepository;
@@ -84,6 +92,7 @@ public class PurInboundService {
 
     public PurInboundService(PurInboundRepository inboundRepository, PurInboundDetailRepository inboundDetailRepository,
             PurOrderRepository orderRepository, PurOrderDetailRepository orderDetailRepository,
+            PurApDocRefRepository docRefRepository,
             BasePartnerRepository partnerRepository, BaseWarehouseRepository warehouseRepository, BaseProductRepository productRepository,
             WmsIoBillRepository ioBillRepository, WmsIoBillDetailRepository ioBillDetailRepository,
             WmsStockRepository stockRepository, WmsStockQcRepository stockQcRepository, WmsStockLogRepository stockLogRepository) {
@@ -91,6 +100,7 @@ public class PurInboundService {
         this.inboundDetailRepository = inboundDetailRepository;
         this.orderRepository = orderRepository;
         this.orderDetailRepository = orderDetailRepository;
+        this.docRefRepository = docRefRepository;
         this.partnerRepository = partnerRepository;
         this.warehouseRepository = warehouseRepository;
         this.productRepository = productRepository;
@@ -599,6 +609,219 @@ public class PurInboundService {
                 bill.getBillNo());
     }
 
+    /**
+     * Purchase inbound reversal/red冲: rollback stock and purchase inbound progress created by IQC-pass execution.
+     *
+     * <p>Rules:</p>
+     * <ul>
+     *   <li>Only completed inbounds can be reversed.</li>
+     *   <li>If the inbound is already referenced by an AP bill (pur_ap_doc_ref), reversal is forbidden.</li>
+     *   <li>Idempotent: repeated reverse returns the same reversal WMS bill.</li>
+     * </ul>
+     */
+    @Transactional
+    public PurInboundReverseResponse reverse(Long inboundId, String operator) {
+        if (inboundId == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "id is required");
+
+        PurInbound inbound = inboundRepository.findByIdForUpdate(inboundId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "入库单不存在"));
+
+        if (Objects.equals(inbound.getStatus(), INBOUND_STATUS_CANCELED)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "入库单已作废，不能冲销");
+        }
+        if (!Objects.equals(inbound.getStatus(), INBOUND_STATUS_COMPLETED)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "仅已完成的入库单允许冲销");
+        }
+        if (inbound.getWmsBillId() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "入库单缺少关联 WMS 单，无法冲销");
+        }
+
+        if (Objects.equals(inbound.getReverseStatus(), REVERSE_STATUS_REVERSED) || Objects.equals(inbound.getStatus(), INBOUND_STATUS_REVERSED)) {
+            PurOrderRepository.PurOrderRow orderRow = orderRepository.getRow(inbound.getOrderId());
+            return new PurInboundReverseResponse(
+                    inbound.getId(),
+                    inbound.getInboundNo(),
+                    inbound.getStatus(),
+                    inbound.getOrderId(),
+                    inbound.getOrderNo(),
+                    orderRow == null ? null : orderRow.getStatus(),
+                    inbound.getReverseWmsBillId(),
+                    inbound.getReverseWmsBillNo());
+        }
+
+        if (docRefRepository.findFirstByDocTypeAndDocId(DOC_TYPE_INBOUND, inbound.getId()).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该入库批次已进入对账单，禁止冲销");
+        }
+
+        WmsIoBill existing = ioBillRepository.findFirstByBizIdAndType(inbound.getWmsBillId(), WMS_BILL_TYPE_STOCK_OUT).orElse(null);
+        if (existing != null) {
+            applyReverseRecord(inbound, existing, operator);
+            PurOrderRepository.PurOrderRow orderRow = orderRepository.getRow(inbound.getOrderId());
+            return new PurInboundReverseResponse(
+                    inbound.getId(),
+                    inbound.getInboundNo(),
+                    inbound.getStatus(),
+                    inbound.getOrderId(),
+                    inbound.getOrderNo(),
+                    orderRow == null ? null : orderRow.getStatus(),
+                    existing.getId(),
+                    existing.getBillNo());
+        }
+
+        WmsIoBill origBill = ioBillRepository.findByIdForUpdate(inbound.getWmsBillId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "关联 WMS 单不存在"));
+        if (!Objects.equals(origBill.getType(), WMS_BILL_TYPE_PURCHASE_IN)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "关联 WMS 单类型异常，无法冲销");
+        }
+        if (!Objects.equals(origBill.getStatus(), WMS_BILL_STATUS_COMPLETED)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "关联 WMS 单未完成，无法冲销");
+        }
+
+        BaseWarehouse wh = warehouseRepository.findByIdAndDeleted(inbound.getWarehouseId(), 0)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "仓库不存在"));
+        if (wh.getStatus() != null && wh.getStatus() != 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "仓库已禁用");
+        }
+
+        PurOrder order = orderRepository.findByIdForUpdate(inbound.getOrderId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "采购单不存在"));
+        if (Objects.equals(order.getStatus(), ORDER_STATUS_CANCELED)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "采购单已作废，不能冲销入库");
+        }
+
+        List<PurOrderDetail> orderDetails = orderDetailRepository.findByOrderIdOrderByIdAsc(order.getId());
+        Map<Long, PurOrderDetail> orderDetailByProductId = new HashMap<>();
+        for (PurOrderDetail d : orderDetails) {
+            orderDetailByProductId.put(d.getProductId(), d);
+        }
+
+        List<PurInboundDetail> inboundDetails = inboundDetailRepository.findByInboundIdOrderByIdAsc(inbound.getId());
+        if (inboundDetails.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "入库单无明细");
+        }
+
+        // Precheck: ensure available stock is sufficient for reversal (stock out).
+        for (PurInboundDetail d : inboundDetails) {
+            BigDecimal qty = safeQty(d.getRealQty());
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
+            WmsStock stock = stockRepository.findFirstByWarehouseIdAndProductId(wh.getId(), d.getProductId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "stock not found"));
+            BigDecimal stockQty = safeQty(stock.getStockQty());
+            BigDecimal lockedQty = safeQty(stock.getLockedQty());
+            validateStockInvariant(stockQty, lockedQty);
+            BigDecimal available = stockQty.subtract(lockedQty);
+            if (available.compareTo(qty) < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "insufficient stock for reversal (productId=" + d.getProductId() + ", available=" + available + ", required=" + qty + ")");
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        WmsIoBill reversal = new WmsIoBill();
+        reversal.setBillNo(generateBillNo("RPI"));
+        reversal.setType(WMS_BILL_TYPE_STOCK_OUT);
+        reversal.setBizId(origBill.getId());
+        reversal.setBizNo(origBill.getBillNo());
+        reversal.setWarehouseId(wh.getId());
+        reversal.setStatus(WMS_BILL_STATUS_COMPLETED);
+        reversal.setRemark("冲销采购入库: " + inbound.getInboundNo());
+        reversal.setCreateBy(trimToNull(operator));
+        reversal.setCreateTime(now);
+        try {
+            reversal = ioBillRepository.saveAndFlush(reversal);
+        } catch (DataIntegrityViolationException e) {
+            existing = ioBillRepository.findFirstByBizIdAndType(inbound.getWmsBillId(), WMS_BILL_TYPE_STOCK_OUT).orElse(null);
+            if (existing != null) {
+                applyReverseRecord(inbound, existing, operator);
+                return new PurInboundReverseResponse(
+                        inbound.getId(),
+                        inbound.getInboundNo(),
+                        inbound.getStatus(),
+                        inbound.getOrderId(),
+                        inbound.getOrderNo(),
+                        order.getStatus(),
+                        existing.getId(),
+                        existing.getBillNo());
+            }
+            throw e;
+        }
+
+        for (PurInboundDetail d : inboundDetails) {
+            BigDecimal qty = safeQty(d.getRealQty());
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            WmsIoBillDetail rd = new WmsIoBillDetail();
+            rd.setBillId(reversal.getId());
+            rd.setProductId(d.getProductId());
+            rd.setQty(qty);
+            rd.setRealQty(qty);
+            ioBillDetailRepository.save(rd);
+
+            WmsStock stock = deductStockWithRetry(wh.getId(), d.getProductId(), qty);
+
+            WmsStockLog log = new WmsStockLog();
+            log.setWarehouseId(wh.getId());
+            log.setProductId(d.getProductId());
+            log.setBizType("PURCHASE_IN_REVERSE");
+            log.setBizNo(reversal.getBillNo());
+            log.setChangeQty(qty.negate());
+            log.setAfterStockQty(safeQty(stock.getStockQty()));
+            log.setCreateTime(now);
+            stockLogRepository.save(log);
+
+            PurOrderDetail od = orderDetailByProductId.get(d.getProductId());
+            if (od == null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "商品不在采购单内: productId=" + d.getProductId());
+            }
+            BigDecimal nextInQty = safeQty(od.getInQty()).subtract(qty);
+            if (nextInQty.compareTo(BigDecimal.ZERO) < 0) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "冲销后入库进度为负: productId=" + d.getProductId());
+            }
+            od.setInQty(nextInQty);
+            orderDetailRepository.save(od);
+        }
+
+        boolean anyIn = false;
+        boolean allCompleted = true;
+        for (PurOrderDetail od : orderDetails) {
+            BigDecimal ordered = safeQty(od.getQty());
+            BigDecimal inQty = safeQty(od.getInQty());
+            if (inQty.compareTo(BigDecimal.ZERO) > 0) anyIn = true;
+            if (inQty.compareTo(ordered) < 0) allCompleted = false;
+        }
+        if (allCompleted) {
+            order.setStatus(ORDER_STATUS_COMPLETED);
+        } else if (anyIn) {
+            order.setStatus(ORDER_STATUS_PARTIAL);
+        } else {
+            order.setStatus(ORDER_STATUS_AUDITED);
+        }
+        orderRepository.save(order);
+
+        applyReverseRecord(inbound, reversal, operator);
+
+        return new PurInboundReverseResponse(
+                inbound.getId(),
+                inbound.getInboundNo(),
+                inbound.getStatus(),
+                inbound.getOrderId(),
+                inbound.getOrderNo(),
+                order.getStatus(),
+                reversal.getId(),
+                reversal.getBillNo());
+    }
+
+    private void applyReverseRecord(PurInbound inbound, WmsIoBill reversal, String operator) {
+        LocalDateTime now = LocalDateTime.now();
+        inbound.setReverseStatus(REVERSE_STATUS_REVERSED);
+        inbound.setReverseBy(trimToNull(operator));
+        inbound.setReverseTime(now);
+        inbound.setReverseWmsBillId(reversal.getId());
+        inbound.setReverseWmsBillNo(reversal.getBillNo());
+        inbound.setStatus(INBOUND_STATUS_REVERSED);
+        inboundRepository.save(inbound);
+    }
+
     private void ensureStockRowExists(Long warehouseId, Long productId) {
         LocalDateTime now = LocalDateTime.now();
         WmsStock stock = stockRepository.findFirstByWarehouseIdAndProductId(warehouseId, productId).orElse(null);
@@ -703,6 +926,37 @@ public class PurInboundService {
                 if (attempts >= 3) throw e;
             }
         }
+    }
+
+    private WmsStock deductStockWithRetry(Long warehouseId, Long productId, BigDecimal qty) {
+        int attempts = 0;
+        while (true) {
+            attempts++;
+            try {
+                return deductStockOnce(warehouseId, productId, qty);
+            } catch (ObjectOptimisticLockingFailureException e) {
+                if (attempts >= 3) throw e;
+            }
+        }
+    }
+
+    private WmsStock deductStockOnce(Long warehouseId, Long productId, BigDecimal qty) {
+        WmsStock stock = stockRepository.findFirstByWarehouseIdAndProductId(warehouseId, productId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "stock not found"));
+
+        BigDecimal stockQty = safeQty(stock.getStockQty());
+        BigDecimal lockedQty = safeQty(stock.getLockedQty());
+        validateStockInvariant(stockQty, lockedQty);
+        BigDecimal available = stockQty.subtract(lockedQty);
+        if (available.compareTo(qty) < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "insufficient stock (available=" + available + ", required=" + qty + ")");
+        }
+        stock.setStockQty(stockQty.subtract(qty));
+        stock.setLockedQty(lockedQty);
+        stock.setUpdateTime(LocalDateTime.now());
+        validateStockInvariant(stock.getStockQty(), stock.getLockedQty());
+        return stockRepository.saveAndFlush(stock);
     }
 
     private WmsStock increaseStockOnce(Long warehouseId, Long productId, BigDecimal qty) {
@@ -814,6 +1068,11 @@ public class PurInboundService {
                 row.getQcRemark(),
                 row.getWmsBillId(),
                 row.getWmsBillNo(),
+                row.getReverseStatus(),
+                row.getReverseBy(),
+                row.getReverseTime(),
+                row.getReverseWmsBillId(),
+                row.getReverseWmsBillNo(),
                 row.getRemark(),
                 row.getCreateBy(),
                 row.getCreateTime(),

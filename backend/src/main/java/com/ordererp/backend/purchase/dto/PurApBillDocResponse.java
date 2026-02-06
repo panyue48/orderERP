@@ -11,6 +11,6 @@ public record PurApBillDocResponse(
         Long orderId,
         String orderNo,
         LocalDateTime docTime,
-        BigDecimal amount) {
+        BigDecimal amount,
+        String productSummary) {
 }
-

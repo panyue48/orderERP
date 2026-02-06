@@ -14,6 +14,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface PurOrderRepository extends JpaRepository<PurOrder, Long> {
+    Optional<PurOrder> findFirstByOrderNo(String orderNo);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from PurOrder o where o.id = :id")
     Optional<PurOrder> findByIdForUpdate(@Param("id") Long id);

@@ -13,7 +13,7 @@
           />
           <el-button @click="reload">查询</el-button>
           <el-button v-if="canAdd" type="success" @click="openReceive()">新增收货批次</el-button>
-          <el-button v-if="canAdd" type="primary" @click="openCreate">新建采购入库</el-button>
+          <el-button v-if="canCreate" type="primary" @click="openCreate">新建采购入库</el-button>
         </div>
       </div>
     </template>
@@ -28,6 +28,7 @@
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-tag v-if="row.status === 2" type="success">已完成</el-tag>
+          <el-tag v-else-if="row.status === 8" type="info">已冲销</el-tag>
           <el-tag v-else-if="row.status === 9" type="danger">已作废</el-tag>
           <el-tag v-else type="warning">待质检</el-tag>
         </template>
@@ -88,6 +89,7 @@
         <el-descriptions-item label="供应商">{{ detail.inbound.supplierName }}</el-descriptions-item>
         <el-descriptions-item label="仓库">{{ detail.inbound.warehouseName }}</el-descriptions-item>
         <el-descriptions-item label="WMS单号">{{ detail.inbound.wmsBillNo }}</el-descriptions-item>
+        <el-descriptions-item v-if="detail.inbound.reverseWmsBillNo" label="冲销WMS单号">{{ detail.inbound.reverseWmsBillNo }}</el-descriptions-item>
         <el-descriptions-item label="质检状态">
           <el-tag v-if="detail.inbound.qcStatus === 2" type="success">通过</el-tag>
           <el-tag v-else-if="detail.inbound.qcStatus === 3" type="danger">不合格</el-tag>
@@ -114,6 +116,19 @@
     </div>
     <template #footer>
       <el-button @click="detailVisible = false">关闭</el-button>
+      <el-popconfirm
+        v-if="canReverse && detail?.inbound?.status === 2 && !detail?.inbound?.reverseWmsBillNo"
+        :title="`确认冲销入库单 ${detail?.inbound?.inboundNo} 吗？将生成一张 WMS 出库单并回滚库存与入库进度。`"
+        confirm-button-text="冲销"
+        cancel-button-text="取消"
+        confirm-button-type="danger"
+        width="420"
+        @confirm="reverse(detail!.inbound.id)"
+      >
+        <template #reference>
+          <el-button type="danger" :loading="reversingId === detail?.inbound?.id">冲销</el-button>
+        </template>
+      </el-popconfirm>
     </template>
   </el-dialog>
 
@@ -163,9 +178,17 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="单价" width="150">
+        <el-table-column v-if="canPriceView" label="单价" width="150">
           <template #default="{ row }">
-            <el-input-number v-model="row.price" :min="0" :precision="2" :step="1" controls-position="right" style="width: 130px" />
+            <el-input-number
+              v-model="row.price"
+              :min="0"
+              :precision="2"
+              :step="1"
+              controls-position="right"
+              style="width: 130px"
+              :disabled="!canPriceEdit"
+            />
           </template>
         </el-table-column>
         <el-table-column label="采购数量" width="150">
@@ -186,7 +209,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="金额" width="140">
+        <el-table-column v-if="canPriceView" label="金额" width="140">
           <template #default="{ row }">
             {{ formatAmount((Number(row.price) || 0) * (Number(row.qty) || 0)) }}
           </template>
@@ -198,7 +221,7 @@
         </el-table-column>
       </el-table>
 
-      <div style="display: flex; justify-content: flex-end; margin-top: 10px; font-weight: 600">
+      <div v-if="canPriceView" style="display: flex; justify-content: flex-end; margin-top: 10px; font-weight: 600">
         合计：{{ formatAmount(totalAmount) }}
       </div>
     </el-form>
@@ -281,6 +304,7 @@ import {
   iqcRejectPurchaseInbound,
   listPurchaseInbounds,
   listPurchaseOrderOptions,
+  reversePurchaseInbound,
   type PurOrderOption,
   type PurPendingQcSummary,
   type PurInbound,
@@ -295,6 +319,10 @@ const auth = useAuthStore()
 const canView = computed(() => auth.hasPerm('pur:inbound:view'))
 const canAdd = computed(() => auth.hasPerm('pur:inbound:add'))
 const canIqc = computed(() => auth.hasPerm('pur:inbound:iqc'))
+const canReverse = computed(() => auth.hasPerm('pur:inbound:reverse'))
+const canPriceView = computed(() => auth.hasPerm('pur:price:view') || auth.hasPerm('pur:price:edit'))
+const canPriceEdit = computed(() => auth.hasPerm('pur:price:edit'))
+const canCreate = computed(() => canAdd.value && canPriceEdit.value)
 
 const keyword = ref('')
 const loading = ref(false)
@@ -341,6 +369,7 @@ const detail = ref<PurInboundDetail | null>(null)
 
 const iqcPassingId = ref<number | null>(null)
 const iqcRejectingId = ref<number | null>(null)
+const reversingId = ref<number | null>(null)
 
 const receiveVisible = ref(false)
 const receiveLoading = ref(false)
@@ -447,6 +476,10 @@ function removeLine(idx: number) {
 }
 
 async function submitCreate() {
+  if (!canPriceEdit.value) {
+    ElMessage.error('无权限编辑单价，无法新建采购入库（自动生成采购订单）')
+    return
+  }
   if (!createForm.value.supplierId) {
     ElMessage.warning('请选择供应商')
     return
@@ -669,6 +702,25 @@ async function iqcReject(id: number) {
     ElMessage.error(e?.response?.data?.message || '操作失败')
   } finally {
     iqcRejectingId.value = null
+  }
+}
+
+async function reverse(id: number) {
+  reversingId.value = id
+  try {
+    const res = await reversePurchaseInbound(id)
+    ElNotification({
+      title: '已冲销',
+      message: `冲销WMS单：${res.reversalWmsBillNo || '-'}`,
+      type: 'success',
+      duration: 3500
+    })
+    detailVisible.value = false
+    await reload()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '冲销失败')
+  } finally {
+    reversingId.value = null
   }
 }
 

@@ -77,7 +77,11 @@ const bizTypeLabel = (bizType: string) => {
   if (bizType === 'CHECK_ADJUST_IN') return '盘点调整入库'
   if (bizType === 'CHECK_ADJUST_OUT') return '盘点调整出库'
   if (bizType === 'PURCHASE_IN') return '采购入库'
+  if (bizType === 'PURCHASE_IN_REVERSE') return '采购入库冲销'
   if (bizType === 'PURCHASE_RETURN') return '采购退货'
+  if (bizType === 'SALES_OUT') return '销售出库'
+  if (bizType === 'SALES_RETURN') return '销售退货入库'
+  if (bizType === 'SALES_OUT_REVERSE') return '销售出库冲销'
   if (bizType === 'REVERSAL_IN') return '冲销入库'
   if (bizType === 'REVERSAL_OUT') return '冲销出库'
   return bizType

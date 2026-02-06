@@ -6,6 +6,11 @@
         <div style="display: flex; gap: 8px; align-items: center">
           <el-input v-model="keyword" placeholder="搜索单号/供应商" style="width: 240px" clearable @keyup.enter="reload" />
           <el-button @click="reload">查询</el-button>
+          <el-button v-if="canExport" @click="doExport">导出</el-button>
+          <el-upload v-if="canImport" :show-file-list="false" :before-upload="beforeImport" :http-request="doImport">
+            <el-button>导入</el-button>
+          </el-upload>
+          <el-button v-if="canExport" @click="downloadTemplate">模板</el-button>
         </div>
       </div>
     </template>
@@ -15,7 +20,7 @@
       <el-table-column prop="orderNo" label="单号" width="220" />
       <el-table-column prop="orderDate" label="日期" width="120" />
       <el-table-column prop="supplierName" label="供应商" min-width="180" />
-      <el-table-column prop="totalAmount" label="总额" width="120" />
+      <el-table-column v-if="canPriceView" prop="totalAmount" label="总额" width="120" />
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-tag v-if="row.status === 4" type="success">已完成</el-tag>
@@ -53,7 +58,7 @@
         <el-descriptions-item label="单号">{{ detail.orderNo }}</el-descriptions-item>
         <el-descriptions-item label="供应商">{{ detail.supplierName }}</el-descriptions-item>
         <el-descriptions-item label="日期">{{ detail.orderDate }}</el-descriptions-item>
-        <el-descriptions-item label="总额">{{ detail.totalAmount }}</el-descriptions-item>
+        <el-descriptions-item v-if="canPriceView" label="总额">{{ detail.totalAmount }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag v-if="detail.status === 4" type="success">已完成</el-tag>
           <el-tag v-else-if="detail.status === 3" type="warning">部分入库</el-tag>
@@ -72,9 +77,9 @@
         <el-table-column prop="productCode" label="SKU" width="160" />
         <el-table-column prop="productName" label="商品名称" min-width="240" />
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column prop="price" label="单价" width="120" />
+        <el-table-column v-if="canPriceView" prop="price" label="单价" width="120" />
         <el-table-column prop="qty" label="采购数量" width="120" />
-        <el-table-column prop="amount" label="金额" width="120" />
+        <el-table-column v-if="canPriceView" prop="amount" label="金额" width="120" />
         <el-table-column prop="inQty" label="已入库" width="120" />
       </el-table>
     </div>
@@ -86,12 +91,21 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, ref } from 'vue'
+import { ElLoading, ElMessage, ElNotification } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { getPurchaseOrder, listPurchaseOrders, type PurOrder, type PurOrderDetail } from '../api/purchase'
+import { purchaseExcel } from '../api/purchase-excel'
+import type { ImportResult } from '../api/base-excel'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const auth = useAuthStore()
+
+const canPriceView = computed(() => auth.hasPerm('pur:price:view') || auth.hasPerm('pur:price:edit'))
+const canPriceEdit = computed(() => auth.hasPerm('pur:price:edit'))
+const canExport = computed(() => auth.hasPerm('pur:order:export') && canPriceView.value)
+const canImport = computed(() => auth.hasPerm('pur:order:import') && canPriceEdit.value)
 
 const keyword = ref('')
 const loading = ref(false)
@@ -103,6 +117,10 @@ const total = ref(0)
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<PurOrderDetail | null>(null)
+
+function errText(e: any, fallback: string) {
+  return e?.response?.data?.message || e?.message || fallback
+}
 
 async function reload() {
   loading.value = true
@@ -147,4 +165,56 @@ function canReceive(d: PurOrderDetail) {
 onMounted(async () => {
   await reload()
 })
+
+function beforeImport(file: File) {
+  const ok =
+    file.name.toLowerCase().endsWith('.xlsx') ||
+    file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if (!ok) {
+    ElMessage.error('请上传 .xlsx 文件')
+    return false
+  }
+  return true
+}
+
+async function doImport(options: any) {
+  try {
+    const file = options.file as File
+    const res: ImportResult = await purchaseExcel.importOrders(file)
+    options.onSuccess?.(res as any)
+    if (res.failed > 0) {
+      ElMessage.warning(`导入完成：成功 ${res.inserted + res.updated}，失败 ${res.failed}`)
+    } else {
+      ElMessage.success(`导入完成：新增 ${res.inserted}，更新 ${res.updated}`)
+    }
+    await reload()
+  } catch (e: any) {
+    options.onError?.(e)
+    ElMessage.error(e?.response?.data?.message || '导入失败')
+  }
+}
+
+async function doExport() {
+  const loadingSvc = ElLoading.service({ lock: true, text: '正在生成导出文件...', background: 'rgba(0,0,0,0.15)' })
+  try {
+    await purchaseExcel.exportOrders(keyword.value || undefined)
+    ElNotification({ title: '导出已开始', message: '请在浏览器下载列表查看文件', type: 'success', duration: 3000 })
+  } catch (e: any) {
+    ElNotification({ title: '导出失败', message: errText(e, '导出失败'), type: 'error', duration: 5000 })
+  } finally {
+    loadingSvc.close()
+  }
+}
+
+async function downloadTemplate() {
+  const loadingSvc = ElLoading.service({ lock: true, text: '正在下载模板...', background: 'rgba(0,0,0,0.15)' })
+  try {
+    await purchaseExcel.orderTemplate()
+    ElNotification({ title: '模板下载已开始', message: '请在浏览器下载列表查看文件', type: 'success', duration: 3000 })
+  } catch (e: any) {
+    ElNotification({ title: '模板下载失败', message: errText(e, '模板下载失败'), type: 'error', duration: 5000 })
+  } finally {
+    loadingSvc.close()
+  }
+}
 </script>

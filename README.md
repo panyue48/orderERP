@@ -1,8 +1,61 @@
 # orderERP
 
-企业级 ERP/进销存练习项目（前后端分离）。当前已完成 **第一阶段（System Core）**、**第二阶段（Base Data）**、**第三阶段（WMS Core）** 的核心能力，并配套了基于 **Testcontainers + MySQL** 的集成测试用例。
+企业级 ERP/进销存练习项目（前后端分离）。当前已完成 **第一阶段（System Core）**、**第二阶段（Base Data）**、**第三阶段（WMS Core）**、**第四阶段（Purchase）**、**第五阶段（Sales）** 的核心能力，并配套了基于 **Testcontainers + MySQL** 的集成测试用例。
 
 ---
+
+## 功能展览图（截图占位）
+
+截图统一存放目录：`docs/screenshots/`  
+你后续把截图文件按下面的“路径命名”放进去，README 就会自动展示。
+
+### 第一阶段（System Core）
+
+- 登录 / 权限 / 动态菜单：`docs/screenshots/stage1-auth-and-menu.png`
+
+![stage1-auth-and-menu](docs/screenshots/stage1-auth-and-menu.png)
+
+### 第二阶段（Base Data）
+
+- 商品管理：`docs/screenshots/stage2-products.png`
+- 往来单位管理：`docs/screenshots/stage2-partners.png`
+- Excel 导入/导出：`docs/screenshots/stage2-excel.png`
+
+![stage2-products](docs/screenshots/stage2-products.png)
+![stage2-partners](docs/screenshots/stage2-partners.png)
+![stage2-excel](docs/screenshots/stage2-excel.png)
+
+### 第三阶段（WMS Core）
+
+- 库存列表：`docs/screenshots/stage3-stocks.png`
+- 库存流水：`docs/screenshots/stage3-stock-logs.png`
+- 盘点单（含自动调账）：`docs/screenshots/stage3-check-bills.png`
+
+![stage3-stocks](docs/screenshots/stage3-stocks.png)
+![stage3-stock-logs](docs/screenshots/stage3-stock-logs.png)
+![stage3-check-bills](docs/screenshots/stage3-check-bills.png)
+
+### 第四阶段（Purchase）
+
+- 采购入库（分批收货/质检）：`docs/screenshots/stage4-purchase-inbounds.png`
+- 采购退货：`docs/screenshots/stage4-purchase-returns.png`
+- 采购对账单（AP）：`docs/screenshots/stage4-purchase-ap-bills.png`
+
+![stage4-purchase-inbounds](docs/screenshots/stage4-purchase-inbounds.png)
+![stage4-purchase-returns](docs/screenshots/stage4-purchase-returns.png)
+![stage4-purchase-ap-bills](docs/screenshots/stage4-purchase-ap-bills.png)
+
+### 第五阶段（Sales）
+
+- 销售出库（发货记录/分批）：`docs/screenshots/stage5-sales-outbounds.png`
+- 发货冲销：`docs/screenshots/stage5-sales-ship-reverse.png`
+- 销售退货：`docs/screenshots/stage5-sales-returns.png`
+- 销售对账单（AR）：`docs/screenshots/stage5-sales-ar-bills.png`
+
+![stage5-sales-outbounds](docs/screenshots/stage5-sales-outbounds.png)
+![stage5-sales-ship-reverse](docs/screenshots/stage5-sales-ship-reverse.png)
+![stage5-sales-returns](docs/screenshots/stage5-sales-returns.png)
+![stage5-sales-ar-bills](docs/screenshots/stage5-sales-ar-bills.png)
 
 ## 1. 项目结构
 
@@ -11,8 +64,9 @@ orderERP/
 ├── backend/                 # Spring Boot 后端（JPA + JWT + Flyway）
 │   ├── src/main/java/...    # 业务代码（system/base/wms/ledger）
 │   ├── src/main/resources/  # application.yml + Flyway 迁移脚本 db/migration
-│   └── src/test/java/...    # Testcontainers 集成测试（阶段 1/2/3）
+│   └── src/test/java/...    # Testcontainers 集成测试（阶段 1/2/3/4/5）
 ├── frontend/                # Vue3 前端（Vite + Pinia + Element Plus）
+├── docs/screenshots/        # README 展示截图占位（你后续补图放这里）
 ├── uploads/                 # 本地上传目录（开发环境）
 ├── scripts/                 # 脚本（例如演示数据手动导入）
 └── *.md                     # 阶段文档/问题复盘/工程化记录
@@ -134,6 +188,40 @@ orderERP/
 
 ---
 
+### 3.4 第四阶段：采购业务（Purchase）
+
+目标：把采购“业务流 + 库存联动 + 对账(AP)”跑通，贴近企业真实场景（分批收货、质检、退货、冲销/红冲、对账锁定）。
+
+已实现（主要功能）：
+- 采购订单：录入采购明细（含单价/数量/金额快照）、审核、作废
+- 采购入库：按采购单收货生成入库单、支持分批收货；质检通过后生成 WMS 入库并增加库存；支持不合格处理；支持入库冲销/红冲（修正错误入库）
+- 采购退货：审核/执行，执行后生成 WMS 出库并扣减库存
+- 采购对账单（AP）：按供应商 + 周期汇总入库/退货，单据锁定防重复对账；审核锁定后禁止再新增单据；支持草稿重新生成；支持付款登记/发票登记/作废
+
+对应测试：
+- `backend/src/test/java/com/ordererp/backend/purchase/PurchaseStage4IT.java`
+- `backend/src/test/java/com/ordererp/backend/purchase/PurchaseStage4PartialInboundIT.java`
+- `backend/src/test/java/com/ordererp/backend/purchase/PurchaseStage4ReturnIT.java`
+
+---
+
+### 3.5 第五阶段：销售业务（Sales）
+
+目标：跑通“销售下单 -> 审核锁库 -> 发货扣库”，并补齐退货、发货冲销、应收对账(AR)闭环。
+
+已实现（主要功能）：
+- 销售订单：录入销售明细（含单价/数量/金额快照）、审核锁库、作废（释放未发部分锁库）
+- 销售出库（发货记录）：支持分批/部分发货；发货生成 WMS 销售出库并扣减库存与释放锁库
+- 发货冲销：用于修正“错误发货/错误扣库”，冲销会回滚库存并生成冲销 WMS 单据（幂等）
+- 销售退货：审核/执行，执行后生成 WMS 入库并增加库存
+- 销售对账单（AR）：按客户 + 周期汇总发货(+)与退货(-)，单据锁定防重复对账；审核后支持收款登记/发票登记；支持草稿重新生成/作废（未发生收款/开票前）
+
+对应测试：
+- `backend/src/test/java/com/ordererp/backend/sales/SalesStage5ReturnIT.java`
+- `backend/src/test/java/com/ordererp/backend/sales/SalesStage5ArBillIT.java`
+
+---
+
 ## 4. 快速开始
 
 ### 4.1 准备环境
@@ -171,7 +259,7 @@ npm run dev
 
 ---
 
-## 6. 运行测试（阶段 1/2/3）
+## 6. 运行测试（阶段 1/2/3/4/5）
 
 前置条件：
 - Docker Desktop 正常运行
@@ -190,11 +278,17 @@ mvn test "-Dtest=BaseStage2IT"
 # 第三阶段
 mvn test "-Dtest=WmsStage3HardeningIT"
 
+# 第四阶段
+mvn test "-Dtest=PurchaseStage4IT"
+mvn test "-Dtest=PurchaseStage4PartialInboundIT"
+mvn test "-Dtest=PurchaseStage4ReturnIT"
+
+# 第五阶段
+mvn test "-Dtest=SalesStage5ReturnIT"
+mvn test "-Dtest=SalesStage5ArBillIT"
+
 # 全部测试
 mvn test
 ```
 
 ---
-
-
-

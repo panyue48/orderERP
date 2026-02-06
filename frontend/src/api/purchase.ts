@@ -130,6 +130,11 @@ export type PurInbound = {
   qcRemark?: string | null
   wmsBillId?: number | null
   wmsBillNo?: string | null
+  reverseStatus?: number | null
+  reverseBy?: string | null
+  reverseTime?: string | null
+  reverseWmsBillId?: number | null
+  reverseWmsBillNo?: string | null
   remark?: string | null
   createBy?: string | null
   createTime?: string | null
@@ -199,6 +204,22 @@ export async function iqcRejectPurchaseInbound(id: number, payload?: { remark?: 
   return res.data
 }
 
+export type PurInboundReverseResponse = {
+  inboundId: number
+  inboundNo: string
+  inboundStatus?: number | null
+  orderId: number
+  orderNo: string
+  orderStatus?: number | null
+  reversalWmsBillId?: number | null
+  reversalWmsBillNo?: string | null
+}
+
+export async function reversePurchaseInbound(id: number) {
+  const res = await http.post<PurInboundReverseResponse>(`/api/purchase/inbounds/${id}/reverse`)
+  return res.data
+}
+
 export async function cancelPurchaseOrder(id: number) {
   const res = await http.post<PurOrder>(`/api/purchase/orders/${id}/cancel`)
   return res.data
@@ -236,6 +257,7 @@ export type PurApBillDoc = {
   orderNo?: string | null
   docTime?: string | null
   amount?: string | number | null
+  productSummary?: string | null
 }
 
 export type PurApPayment = {

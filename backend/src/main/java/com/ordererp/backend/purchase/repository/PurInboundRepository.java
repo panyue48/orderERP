@@ -37,6 +37,11 @@ public interface PurInboundRepository extends JpaRepository<PurInbound, Long> {
               i.qc_remark as qcRemark,
               i.wms_bill_id as wmsBillId,
               i.wms_bill_no as wmsBillNo,
+              i.reverse_status as reverseStatus,
+              i.reverse_by as reverseBy,
+              i.reverse_time as reverseTime,
+              i.reverse_wms_bill_id as reverseWmsBillId,
+              i.reverse_wms_bill_no as reverseWmsBillNo,
               i.remark as remark,
               i.create_by as createBy,
               i.create_time as createTime,
@@ -121,6 +126,11 @@ public interface PurInboundRepository extends JpaRepository<PurInbound, Long> {
               i.qc_remark as qcRemark,
               i.wms_bill_id as wmsBillId,
               i.wms_bill_no as wmsBillNo,
+              i.reverse_status as reverseStatus,
+              i.reverse_by as reverseBy,
+              i.reverse_time as reverseTime,
+              i.reverse_wms_bill_id as reverseWmsBillId,
+              i.reverse_wms_bill_no as reverseWmsBillNo,
               i.remark as remark,
               i.create_by as createBy,
               i.create_time as createTime,
@@ -168,6 +178,16 @@ public interface PurInboundRepository extends JpaRepository<PurInbound, Long> {
         Long getWmsBillId();
 
         String getWmsBillNo();
+
+        Integer getReverseStatus();
+
+        String getReverseBy();
+
+        LocalDateTime getReverseTime();
+
+        Long getReverseWmsBillId();
+
+        String getReverseWmsBillNo();
 
         String getRemark();
 

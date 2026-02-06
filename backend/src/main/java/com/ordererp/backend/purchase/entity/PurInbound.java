@@ -53,6 +53,21 @@ public class PurInbound {
     @Column(name = "wms_bill_no")
     private String wmsBillNo;
 
+    @Column(name = "reverse_status")
+    private Integer reverseStatus;
+
+    @Column(name = "reverse_by")
+    private String reverseBy;
+
+    @Column(name = "reverse_time")
+    private LocalDateTime reverseTime;
+
+    @Column(name = "reverse_wms_bill_id")
+    private Long reverseWmsBillId;
+
+    @Column(name = "reverse_wms_bill_no")
+    private String reverseWmsBillNo;
+
     private String remark;
 
     @Column(name = "create_by")
@@ -177,6 +192,46 @@ public class PurInbound {
 
     public void setWmsBillNo(String wmsBillNo) {
         this.wmsBillNo = wmsBillNo;
+    }
+
+    public Integer getReverseStatus() {
+        return reverseStatus;
+    }
+
+    public void setReverseStatus(Integer reverseStatus) {
+        this.reverseStatus = reverseStatus;
+    }
+
+    public String getReverseBy() {
+        return reverseBy;
+    }
+
+    public void setReverseBy(String reverseBy) {
+        this.reverseBy = reverseBy;
+    }
+
+    public LocalDateTime getReverseTime() {
+        return reverseTime;
+    }
+
+    public void setReverseTime(LocalDateTime reverseTime) {
+        this.reverseTime = reverseTime;
+    }
+
+    public Long getReverseWmsBillId() {
+        return reverseWmsBillId;
+    }
+
+    public void setReverseWmsBillId(Long reverseWmsBillId) {
+        this.reverseWmsBillId = reverseWmsBillId;
+    }
+
+    public String getReverseWmsBillNo() {
+        return reverseWmsBillNo;
+    }
+
+    public void setReverseWmsBillNo(String reverseWmsBillNo) {
+        this.reverseWmsBillNo = reverseWmsBillNo;
     }
 
     public String getRemark() {

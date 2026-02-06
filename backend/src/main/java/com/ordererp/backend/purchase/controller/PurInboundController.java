@@ -5,6 +5,7 @@ import com.ordererp.backend.purchase.dto.PurInboundDetailResponse;
 import com.ordererp.backend.purchase.dto.PurInboundExecuteResponse;
 import com.ordererp.backend.purchase.dto.PurInboundIqcRequest;
 import com.ordererp.backend.purchase.dto.PurInboundNewOrderRequest;
+import com.ordererp.backend.purchase.dto.PurInboundReverseResponse;
 import com.ordererp.backend.purchase.dto.PurInboundResponse;
 import com.ordererp.backend.purchase.service.PurInboundService;
 import com.ordererp.backend.system.security.SysUserDetails;
@@ -52,7 +53,7 @@ public class PurInboundController {
      * 新建采购入库单（同时创建采购订单并执行入库）。
      */
     @PostMapping
-    @PreAuthorize("hasAuthority('pur:inbound:add')")
+    @PreAuthorize("hasAuthority('pur:inbound:add') and hasAuthority('pur:price:edit')")
     public PurInboundExecuteResponse create(@Valid @RequestBody PurInboundNewOrderRequest request, Authentication authentication) {
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
         return inboundService.createAndExecuteNewOrder(request, user.getUsername());
@@ -72,5 +73,12 @@ public class PurInboundController {
             Authentication authentication) {
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
         return inboundService.iqcReject(id, request == null ? null : request.remark(), user.getUsername());
+    }
+
+    @PostMapping("/{id}/reverse")
+    @PreAuthorize("hasAuthority('pur:inbound:reverse')")
+    public PurInboundReverseResponse reverse(@PathVariable Long id, Authentication authentication) {
+        SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
+        return inboundService.reverse(id, user.getUsername());
     }
 }
