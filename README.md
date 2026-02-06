@@ -4,11 +4,6 @@
 
 ---
 
-## 功能展览图（截图占位）
-
-截图统一存放目录：`docs/screenshots/`  
-你后续把截图文件按下面的“路径命名”放进去，README 就会自动展示。
-
 ### 第一阶段（System Core）
 
 - 登录 / 权限 / 动态菜单：`docs/screenshots/stage1-auth-and-menu.png`
@@ -23,7 +18,7 @@
 
 ![stage2-products](docs/screenshots/stage2-products.png)
 ![stage2-partners](docs/screenshots/stage2-partners.png)
-![stage2-excel](docs/screenshots/stage2-excel.png)
+
 
 ### 第三阶段（WMS Core）
 
