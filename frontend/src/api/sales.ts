@@ -85,6 +85,17 @@ export type SalShip = {
   createTime?: string | null
 }
 
+export type SalCreditUsage = {
+  customerId: number
+  creditLimit?: string | number | null
+  usedAmount?: string | number | null
+  availableAmount?: string | number | null
+  outstandingArAmount?: string | number | null
+  unbilledNetAmount?: string | number | null
+  openOrderReservedAmount?: string | number | null
+  enabled?: boolean | null
+}
+
 export async function listSalesOrderShips(orderId: number) {
   const res = await http.get<SalShip[]>(`/api/sales/orders/${orderId}/ships`)
   return res.data
@@ -118,6 +129,28 @@ export async function createSalesOrder(payload: {
   return res.data
 }
 
+export async function quickShipSalesOrder(payload: {
+  customerId: number
+  warehouseId: number
+  orderDate?: string
+  remark?: string
+  lines: { productId: number; qty: number; price?: number | null }[]
+}) {
+  const res = await http.post<SalOrder>('/api/sales/orders/quick-ship', payload)
+  return res.data
+}
+
+export async function quickAuditSalesOrder(payload: {
+  customerId: number
+  warehouseId: number
+  orderDate?: string
+  remark?: string
+  lines: { productId: number; qty: number; price?: number | null }[]
+}) {
+  const res = await http.post<SalOrder>('/api/sales/orders/quick-audit', payload)
+  return res.data
+}
+
 export async function auditSalesOrder(id: number) {
   const res = await http.post<SalOrder>(`/api/sales/orders/${id}/audit`)
   return res.data
@@ -130,7 +163,7 @@ export async function shipSalesOrder(id: number) {
 
 export async function shipSalesOrderBatch(
   id: number,
-  payload: { lines: { orderDetailId: number; productId: number; qty: number }[] }
+  payload: { requestNo: string; lines: { orderDetailId: number; productId: number; qty: number }[] }
 ) {
   const res = await http.post<SalOrder>(`/api/sales/orders/${id}/ships`, payload)
   return res.data
@@ -138,5 +171,22 @@ export async function shipSalesOrderBatch(
 
 export async function cancelSalesOrder(id: number) {
   const res = await http.post<SalOrder>(`/api/sales/orders/${id}/cancel`)
+  return res.data
+}
+
+export async function deleteSalesOrderDraft(id: number) {
+  const res = await http.post<void>(`/api/sales/orders/${id}/delete`)
+  return res.data
+}
+
+export async function getSalesCustomerCreditUsage(customerId: number) {
+  const res = await http.get<SalCreditUsage>(`/api/sales/credit/customers/${customerId}`)
+  return res.data
+}
+
+export async function listSalesCustomerCreditUsage(customerIds: number[]) {
+  const ids = (customerIds || []).filter(Boolean)
+  if (ids.length === 0) return []
+  const res = await http.get<SalCreditUsage[]>(`/api/sales/credit/customers`, { params: { customerIds: ids.join(',') } })
   return res.data
 }

@@ -10,6 +10,7 @@ import com.ordererp.backend.sales.entity.SalShip;
 import com.ordererp.backend.sales.entity.SalShipDetail;
 import com.ordererp.backend.sales.repository.SalOrderDetailRepository;
 import com.ordererp.backend.sales.repository.SalOrderRepository;
+import com.ordererp.backend.sales.repository.SalReturnDetailRepository;
 import com.ordererp.backend.sales.repository.SalShipDetailRepository;
 import com.ordererp.backend.sales.repository.SalShipRepository;
 import com.ordererp.backend.wms.entity.WmsIoBill;
@@ -55,6 +56,7 @@ public class SalShipService {
     private final SalShipDetailRepository shipDetailRepository;
     private final SalOrderRepository orderRepository;
     private final SalOrderDetailRepository orderDetailRepository;
+    private final SalReturnDetailRepository returnDetailRepository;
     private final WmsIoBillRepository ioBillRepository;
     private final WmsIoBillDetailRepository ioBillDetailRepository;
     private final WmsStockRepository stockRepository;
@@ -62,12 +64,14 @@ public class SalShipService {
 
     public SalShipService(SalShipRepository shipRepository, SalShipDetailRepository shipDetailRepository,
             SalOrderRepository orderRepository, SalOrderDetailRepository orderDetailRepository,
+            SalReturnDetailRepository returnDetailRepository,
             WmsIoBillRepository ioBillRepository, WmsIoBillDetailRepository ioBillDetailRepository,
             WmsStockRepository stockRepository, WmsStockLogRepository stockLogRepository) {
         this.shipRepository = shipRepository;
         this.shipDetailRepository = shipDetailRepository;
         this.orderRepository = orderRepository;
         this.orderDetailRepository = orderDetailRepository;
+        this.returnDetailRepository = returnDetailRepository;
         this.ioBillRepository = ioBillRepository;
         this.ioBillDetailRepository = ioBillDetailRepository;
         this.stockRepository = stockRepository;
@@ -82,18 +86,37 @@ public class SalShipService {
     public SalShipDetailResponse detail(Long shipId) {
         var header = shipRepository.getRow(shipId);
         if (header == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "销售出库单不存在");
-        var items = shipDetailRepository.listRows(shipId).stream()
-                .map(r -> new SalShipItemResponse(
-                        r.getId(),
-                        r.getShipId(),
-                        r.getOrderId(),
-                        r.getOrderDetailId(),
-                        r.getProductId(),
-                        r.getProductCode(),
-                        r.getProductName(),
-                        r.getUnit(),
-                        r.getQty()))
-                .toList();
+        List<SalShipDetailRepository.ShipItemRow> shipRows = shipDetailRepository.listRows(shipId);
+
+        Map<Long, BigDecimal> returnedByShipDetailId = new HashMap<>();
+        if (shipRows != null && !shipRows.isEmpty()) {
+            List<Long> shipDetailIds = shipRows.stream().map(SalShipDetailRepository.ShipItemRow::getId).toList();
+            for (var rr : returnDetailRepository.sumReturnedQtyByShipDetailIds(shipDetailIds)) {
+                if (rr == null || rr.getShipDetailId() == null) continue;
+                returnedByShipDetailId.put(rr.getShipDetailId(), safeQty(rr.getReturnedQty()));
+            }
+        }
+
+        var items = (shipRows == null ? List.<SalShipItemResponse>of() : shipRows.stream()
+                .map(r -> {
+                    BigDecimal shipped = safeQty(r.getQty());
+                    BigDecimal returned = safeQty(returnedByShipDetailId.get(r.getId()));
+                    BigDecimal returnable = shipped.subtract(returned);
+                    if (returnable.compareTo(BigDecimal.ZERO) < 0) returnable = BigDecimal.ZERO;
+                    return new SalShipItemResponse(
+                            r.getId(),
+                            r.getShipId(),
+                            r.getOrderId(),
+                            r.getOrderDetailId(),
+                            r.getProductId(),
+                            r.getProductCode(),
+                            r.getProductName(),
+                            r.getUnit(),
+                            shipped,
+                            returned,
+                            returnable);
+                })
+                .toList());
         return new SalShipDetailResponse(toShipResponse(header), items);
     }
 

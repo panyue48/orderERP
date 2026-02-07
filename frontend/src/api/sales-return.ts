@@ -16,6 +16,10 @@ export type SalReturn = {
   customerName?: string | null
   warehouseId: number
   warehouseName?: string | null
+  shipId?: number | null
+  shipNo?: string | null
+  orderId?: number | null
+  orderNo?: string | null
   returnDate: string
   totalQty?: string | number | null
   totalAmount?: string | number | null
@@ -27,12 +31,20 @@ export type SalReturn = {
   createTime?: string | null
   auditBy?: string | null
   auditTime?: string | null
+  receiveBy?: string | null
+  receiveTime?: string | null
+  qcBy?: string | null
+  qcTime?: string | null
+  qcDisposition?: string | null
+  qcRemark?: string | null
   executeBy?: string | null
   executeTime?: string | null
 }
 
 export type SalReturnItem = {
   id: number
+  shipDetailId?: number | null
+  orderDetailId?: number | null
   productId: number
   productCode?: string | null
   productName?: string | null
@@ -63,11 +75,12 @@ export async function getSalesReturn(id: number) {
 }
 
 export async function createSalesReturn(payload: {
+  shipId: number
   customerId: number
   warehouseId: number
   returnDate?: string
   remark?: string
-  lines: { productId: number; qty: number; price?: number | null }[]
+  lines: { shipDetailId: number; qty: number }[]
 }) {
   const res = await http.post<SalReturn>('/api/sales/returns', payload)
   return res.data
@@ -83,8 +96,17 @@ export async function executeSalesReturn(id: number) {
   return res.data
 }
 
+export async function receiveSalesReturn(id: number) {
+  const res = await http.post<SalReturn>(`/api/sales/returns/${id}/receive`)
+  return res.data
+}
+
+export async function qcRejectSalesReturn(id: number, payload: { disposition: string; remark?: string }) {
+  const res = await http.post<SalReturn>(`/api/sales/returns/${id}/qc-reject`, payload)
+  return res.data
+}
+
 export async function cancelSalesReturn(id: number) {
   const res = await http.post<SalReturn>(`/api/sales/returns/${id}/cancel`)
   return res.data
 }
-

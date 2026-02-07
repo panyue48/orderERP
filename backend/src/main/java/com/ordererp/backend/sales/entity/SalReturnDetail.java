@@ -18,6 +18,12 @@ public class SalReturnDetail {
     @Column(name = "return_id", nullable = false)
     private Long returnId;
 
+    @Column(name = "ship_detail_id")
+    private Long shipDetailId;
+
+    @Column(name = "order_detail_id")
+    private Long orderDetailId;
+
     @Column(name = "product_id", nullable = false)
     private Long productId;
 
@@ -53,6 +59,22 @@ public class SalReturnDetail {
 
     public void setReturnId(Long returnId) {
         this.returnId = returnId;
+    }
+
+    public Long getShipDetailId() {
+        return shipDetailId;
+    }
+
+    public void setShipDetailId(Long shipDetailId) {
+        this.shipDetailId = shipDetailId;
+    }
+
+    public Long getOrderDetailId() {
+        return orderDetailId;
+    }
+
+    public void setOrderDetailId(Long orderDetailId) {
+        this.orderDetailId = orderDetailId;
     }
 
     public Long getProductId() {
@@ -111,4 +133,3 @@ public class SalReturnDetail {
         this.amount = amount;
     }
 }
-

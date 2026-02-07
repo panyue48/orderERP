@@ -11,6 +11,7 @@ public record SalShipItemResponse(
         String productCode,
         String productName,
         String unit,
-        BigDecimal qty) {
+        BigDecimal qty,
+        BigDecimal returnedQty,
+        BigDecimal returnableQty) {
 }
-

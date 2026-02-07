@@ -3,6 +3,7 @@ package com.ordererp.backend.sales.controller;
 import com.ordererp.backend.common.dto.PageResponse;
 import com.ordererp.backend.sales.dto.SalOrderCreateRequest;
 import com.ordererp.backend.sales.dto.SalOrderDetailResponse;
+import com.ordererp.backend.sales.dto.SalOrderItemResponse;
 import com.ordererp.backend.sales.dto.SalOrderResponse;
 import com.ordererp.backend.sales.dto.SalOrderOptionResponse;
 import com.ordererp.backend.sales.dto.SalShipBatchRequest;
@@ -18,6 +19,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -42,9 +44,13 @@ public class SalOrderController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) LocalDate startDate,
-            @RequestParam(required = false) LocalDate endDate) {
+            @RequestParam(required = false) LocalDate endDate,
+            Authentication authentication) {
         Pageable pageable = PageRequest.of(page, size);
         Page<SalOrderResponse> res = orderService.page(keyword, customerId, startDate, endDate, pageable);
+        if (!canViewPrice(authentication)) {
+            res = res.map(SalOrderController::maskPrice);
+        }
         return PageResponse.from(res);
     }
 
@@ -57,8 +63,9 @@ public class SalOrderController {
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('sal:order:view')")
-    public SalOrderDetailResponse detail(@PathVariable Long id) {
-        return orderService.detail(id);
+    public SalOrderDetailResponse detail(@PathVariable Long id, Authentication authentication) {
+        SalOrderDetailResponse res = orderService.detail(id);
+        return canViewPrice(authentication) ? res : maskPrice(res);
     }
 
     @GetMapping("/{id}/ships")
@@ -74,10 +81,24 @@ public class SalOrderController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('sal:order:add')")
+    @PreAuthorize("hasAuthority('sal:order:add') and hasAuthority('sal:price:edit')")
     public SalOrderResponse create(@Valid @RequestBody SalOrderCreateRequest request, Authentication authentication) {
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
         return orderService.create(request, user.getUsername());
+    }
+
+    @PostMapping("/quick-ship")
+    @PreAuthorize("hasAuthority('sal:order:add') and hasAuthority('sal:price:edit') and hasAuthority('sal:order:audit') and hasAuthority('sal:order:ship')")
+    public SalOrderResponse quickShip(@Valid @RequestBody SalOrderCreateRequest request, Authentication authentication) {
+        SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
+        return orderService.quickShip(request, user.getUsername());
+    }
+
+    @PostMapping("/quick-audit")
+    @PreAuthorize("hasAuthority('sal:order:add') and hasAuthority('sal:price:edit') and hasAuthority('sal:order:audit')")
+    public SalOrderResponse quickAudit(@Valid @RequestBody SalOrderCreateRequest request, Authentication authentication) {
+        SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
+        return orderService.quickAudit(request, user.getUsername());
     }
 
     @PostMapping("/{id}/audit")
@@ -100,7 +121,7 @@ public class SalOrderController {
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
         List<SalOrderService.ShipLine> lines = request.lines() == null ? List.of()
                 : request.lines().stream().map(l -> new SalOrderService.ShipLine(l.orderDetailId(), l.productId(), l.qty())).toList();
-        orderService.shipBatch(id, lines, user.getUsername());
+        orderService.shipBatch(id, request.requestNo(), lines, user.getUsername());
         return orderService.get(id);
     }
 
@@ -109,5 +130,86 @@ public class SalOrderController {
     public SalOrderResponse cancel(@PathVariable Long id, Authentication authentication) {
         SysUserDetails user = (SysUserDetails) authentication.getPrincipal();
         return orderService.cancel(id, user.getUsername());
+    }
+
+    @PostMapping("/{id}/delete")
+    @PreAuthorize("hasAuthority('sal:order:delete')")
+    public void deleteDraft(@PathVariable Long id, Authentication authentication) {
+        orderService.deleteDraft(id);
+    }
+
+    private static boolean canViewPrice(Authentication authentication) {
+        if (authentication == null) return false;
+        for (GrantedAuthority ga : authentication.getAuthorities()) {
+            String a = ga.getAuthority();
+            if ("sal:price:view".equals(a) || "sal:price:edit".equals(a)) return true;
+        }
+        return false;
+    }
+
+    private static SalOrderResponse maskPrice(SalOrderResponse r) {
+        if (r == null) return null;
+        return new SalOrderResponse(
+                r.id(),
+                r.orderNo(),
+                r.customerId(),
+                r.customerCode(),
+                r.customerName(),
+                r.warehouseId(),
+                r.warehouseName(),
+                r.orderDate(),
+                null,
+                r.status(),
+                r.remark(),
+                r.wmsBillId(),
+                r.wmsBillNo(),
+                r.createBy(),
+                r.createTime(),
+                r.auditBy(),
+                r.auditTime(),
+                r.shipBy(),
+                r.shipTime());
+    }
+
+    private static SalOrderDetailResponse maskPrice(SalOrderDetailResponse d) {
+        if (d == null) return null;
+        List<SalOrderItemResponse> items = d.items() == null ? List.of() : d.items().stream().map(SalOrderController::maskPrice).toList();
+        return new SalOrderDetailResponse(
+                d.id(),
+                d.orderNo(),
+                d.customerId(),
+                d.customerCode(),
+                d.customerName(),
+                d.warehouseId(),
+                d.warehouseName(),
+                d.orderDate(),
+                null,
+                d.status(),
+                d.remark(),
+                d.wmsBillId(),
+                d.wmsBillNo(),
+                d.createBy(),
+                d.createTime(),
+                d.auditBy(),
+                d.auditTime(),
+                d.shipBy(),
+                d.shipTime(),
+                d.cancelBy(),
+                d.cancelTime(),
+                items);
+    }
+
+    private static SalOrderItemResponse maskPrice(SalOrderItemResponse it) {
+        if (it == null) return null;
+        return new SalOrderItemResponse(
+                it.id(),
+                it.productId(),
+                it.productCode(),
+                it.productName(),
+                it.unit(),
+                null,
+                it.qty(),
+                it.shippedQty(),
+                null);
     }
 }

@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 
 public record SalReturnItemResponse(
         Long id,
+        Long shipDetailId,
+        Long orderDetailId,
         Long productId,
         String productCode,
         String productName,
@@ -12,4 +14,3 @@ public record SalReturnItemResponse(
         BigDecimal qty,
         BigDecimal amount) {
 }
-

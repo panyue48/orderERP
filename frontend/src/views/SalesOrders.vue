@@ -29,7 +29,9 @@
       <el-table-column prop="orderDate" label="日期" width="120" />
       <el-table-column prop="customerName" label="客户" min-width="180" />
       <el-table-column prop="warehouseName" label="发货仓库" min-width="160" />
-      <el-table-column prop="totalAmount" label="金额" width="120" />
+      <el-table-column label="金额" width="120">
+        <template #default="{ row }">{{ canPriceView ? row.totalAmount ?? '-' : '-' }}</template>
+      </el-table-column>
       <el-table-column label="状态" width="140">
         <template #default="{ row }">
           <el-tag v-if="row.status === 1" type="info">草稿</el-tag>
@@ -42,9 +44,10 @@
       <el-table-column prop="createBy" label="创建人" width="120" />
       <el-table-column prop="createTime" label="创建时间" width="180" />
       <el-table-column prop="remark" label="备注" min-width="160" />
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
+          <el-button v-if="canDeleteDraft && row.status === 1" link type="danger" @click="deleteDraft(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -68,7 +71,7 @@
         <el-descriptions-item label="客户">{{ detail.customerName }}</el-descriptions-item>
         <el-descriptions-item label="日期">{{ detail.orderDate }}</el-descriptions-item>
         <el-descriptions-item label="发货仓库">{{ detail.warehouseName }}</el-descriptions-item>
-        <el-descriptions-item label="金额">{{ detail.totalAmount }}</el-descriptions-item>
+        <el-descriptions-item label="金额">{{ canPriceView ? detail.totalAmount ?? '-' : '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag v-if="detail.status === 1" type="info">草稿</el-tag>
           <el-tag v-else-if="detail.status === 2" type="warning">已审核(锁库)</el-tag>
@@ -92,7 +95,9 @@
         <el-table-column prop="productCode" label="SKU" width="160" />
         <el-table-column prop="productName" label="商品名称" min-width="240" />
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column prop="price" label="单价" width="120" />
+        <el-table-column label="单价" width="120">
+          <template #default="{ row }">{{ canPriceView ? row.price ?? '-' : '-' }}</template>
+        </el-table-column>
         <el-table-column prop="qty" label="数量" width="120" />
         <el-table-column prop="shippedQty" label="已发" width="120" />
         <el-table-column label="未发" width="120">
@@ -100,7 +105,9 @@
             {{ formatQty(Number(row.qty || 0) - Number(row.shippedQty || 0)) }}
           </template>
         </el-table-column>
-        <el-table-column prop="amount" label="金额" width="120" />
+        <el-table-column label="金额" width="120">
+          <template #default="{ row }">{{ canPriceView ? row.amount ?? '-' : '-' }}</template>
+        </el-table-column>
       </el-table>
 
       <div style="margin-top: 12px">
@@ -127,12 +134,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
-import { http } from '../api/http'
-import { listWarehouseOptions, type WarehouseOption } from '../api/wms'
-import {
+ import { computed, onMounted, ref } from 'vue'
+ import { ElMessage, ElMessageBox } from 'element-plus'
+ import { useRouter } from 'vue-router'
+ import { http } from '../api/http'
+ import { listWarehouseOptions, type WarehouseOption } from '../api/wms'
+ import {
+  deleteSalesOrderDraft,
   getSalesOrder,
   listSalesOrderShips,
   listSalesOrders,
@@ -144,8 +152,10 @@ import { useAuthStore } from '../stores/auth'
 
 type PartnerOption = { id: number; partnerCode: string; partnerName: string; type: number }
 
-const auth = useAuthStore()
-const router = useRouter()
+ const auth = useAuthStore()
+ const router = useRouter()
+ const canPriceView = computed(() => auth.hasPerm('sal:price:view') || auth.hasPerm('sal:price:edit'))
+ const canDeleteDraft = computed(() => auth.hasPerm('sal:order:delete'))
 
 const keyword = ref('')
 const customerId = ref<number | undefined>(undefined)
@@ -202,6 +212,27 @@ async function openDetail(id: number) {
     ElMessage.error(e?.response?.data?.message || '加载详情失败')
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function deleteDraft(row: SalOrder) {
+  if (!row?.id) return
+  try {
+    await ElMessageBox.confirm(`确认删除草稿订单 ${row.orderNo} 吗？删除后不可恢复。`, '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteSalesOrderDraft(row.id)
+    if (detailVisible.value && detail.value?.id === row.id) {
+      detailVisible.value = false
+      detail.value = null
+      ships.value = []
+    }
+    ElMessage.success('已删除')
+    await reload()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '删除失败')
   }
 }
 

@@ -92,6 +92,85 @@ public interface SalArBillRepository extends JpaRepository<SalArBill, Long> {
     SalArBillRow getRow(@Param("id") Long id);
 
     @Query(value = """
+            select coalesce(
+              sum(greatest(coalesce(b.total_amount, 0.00) - coalesce(b.received_amount, 0.00), 0.00)),
+              0.00
+            )
+            from sal_ar_bill b
+            where b.customer_id = :customerId
+              and b.status in (1, 2, 3, 4)
+            """, nativeQuery = true)
+    BigDecimal sumOutstandingByCustomerId(@Param("customerId") Long customerId);
+
+    @Query(value = """
+            select coalesce(sum(d.qty * coalesce(od.price, 0.00)), 0.00) as amount
+            from sal_ship s
+            join sal_ship_detail d on d.ship_id = s.id
+            join sal_order_detail od on od.id = d.order_detail_id
+            left join sal_ar_doc_ref r on r.doc_type = 1 and r.doc_id = s.id
+            where s.customer_id = :customerId
+              and (s.reverse_status is null or s.reverse_status = 0)
+              and s.ship_time is not null
+              and r.id is null
+            """, nativeQuery = true)
+    BigDecimal sumUnbilledShipAmountByCustomerId(@Param("customerId") Long customerId);
+
+    @Query(value = """
+            select coalesce(sum(0.00 - coalesce(r.total_amount, 0.00)), 0.00) as amount
+            from sal_return r
+            left join sal_ar_doc_ref x on x.doc_type = 2 and x.doc_id = r.id
+            where r.customer_id = :customerId
+              and r.status = 4
+              and r.execute_time is not null
+              and x.id is null
+            """, nativeQuery = true)
+    BigDecimal sumUnbilledReturnAmountByCustomerId(@Param("customerId") Long customerId);
+
+    @Query(value = """
+            select
+              b.customer_id as customerId,
+              coalesce(
+                sum(greatest(coalesce(b.total_amount, 0.00) - coalesce(b.received_amount, 0.00), 0.00)),
+                0.00
+              ) as amount
+            from sal_ar_bill b
+            where b.customer_id in (:customerIds)
+              and b.status in (1, 2, 3, 4)
+            group by b.customer_id
+            """, nativeQuery = true)
+    List<CustomerAmountRow> sumOutstandingByCustomerIds(@Param("customerIds") List<Long> customerIds);
+
+    @Query(value = """
+            select
+              s.customer_id as customerId,
+              coalesce(sum(d.qty * coalesce(od.price, 0.00)), 0.00) as amount
+            from sal_ship s
+            join sal_ship_detail d on d.ship_id = s.id
+            join sal_order_detail od on od.id = d.order_detail_id
+            left join sal_ar_doc_ref r on r.doc_type = 1 and r.doc_id = s.id
+            where s.customer_id in (:customerIds)
+              and (s.reverse_status is null or s.reverse_status = 0)
+              and s.ship_time is not null
+              and r.id is null
+            group by s.customer_id
+            """, nativeQuery = true)
+    List<CustomerAmountRow> sumUnbilledShipAmountByCustomerIds(@Param("customerIds") List<Long> customerIds);
+
+    @Query(value = """
+            select
+              r.customer_id as customerId,
+              coalesce(sum(0.00 - coalesce(r.total_amount, 0.00)), 0.00) as amount
+            from sal_return r
+            left join sal_ar_doc_ref x on x.doc_type = 2 and x.doc_id = r.id
+            where r.customer_id in (:customerIds)
+              and r.status = 4
+              and r.execute_time is not null
+              and x.id is null
+            group by r.customer_id
+            """, nativeQuery = true)
+    List<CustomerAmountRow> sumUnbilledReturnAmountByCustomerIds(@Param("customerIds") List<Long> customerIds);
+
+    @Query(value = """
             select
               s.id as docId,
               s.ship_no as docNo,
@@ -189,4 +268,3 @@ public interface SalArBillRepository extends JpaRepository<SalArBill, Long> {
         LocalDateTime getAuditTime();
     }
 }
-

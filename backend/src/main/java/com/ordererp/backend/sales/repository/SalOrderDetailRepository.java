@@ -10,6 +10,8 @@ import org.springframework.data.repository.query.Param;
 public interface SalOrderDetailRepository extends JpaRepository<SalOrderDetail, Long> {
     List<SalOrderDetail> findByOrderIdOrderByIdAsc(Long orderId);
 
+    long deleteByOrderId(Long orderId);
+
     @Query(value = """
             select
               d.id as id,

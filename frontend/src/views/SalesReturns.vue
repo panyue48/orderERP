@@ -17,11 +17,16 @@
       <el-table-column prop="returnDate" label="日期" width="120" />
       <el-table-column prop="customerName" label="客户" min-width="180" />
       <el-table-column prop="warehouseName" label="仓库" min-width="140" />
-      <el-table-column prop="totalAmount" label="总额" width="120" />
+      <el-table-column prop="shipNo" label="发货批次" width="220" />
+      <el-table-column label="总额" width="120">
+        <template #default="{ row }">{{ canPriceView ? row.totalAmount ?? '-' : '-' }}</template>
+      </el-table-column>
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-tag v-if="row.status === 4" type="success">已完成</el-tag>
-          <el-tag v-else-if="row.status === 2" type="info">已审核</el-tag>
+          <el-tag v-else-if="row.status === 3" type="warning">待质检</el-tag>
+          <el-tag v-else-if="row.status === 2" type="info">待收货</el-tag>
+          <el-tag v-else-if="row.status === 5" type="danger">不合格</el-tag>
           <el-tag v-else-if="row.status === 9" type="danger">已作废</el-tag>
           <el-tag v-else type="warning">待审核</el-tag>
         </template>
@@ -48,21 +53,45 @@
           </el-popconfirm>
 
           <el-popconfirm
-            v-if="canExecute && row.status === 2"
-            :title="`确认执行退货单 ${row.returnNo} 吗？将增加库存并生成 WMS 入库单。`"
-            confirm-button-text="执行"
+            v-if="canReceive && row.status === 2"
+            :title="`确认收货并入待检吗？库存不会变化，将进入“待质检”。`"
+            confirm-button-text="收货"
+            cancel-button-text="取消"
+            confirm-button-type="primary"
+            width="360"
+            @confirm="receive(row.id)"
+          >
+            <template #reference>
+              <el-button link type="primary" :loading="receivingId === row.id">收货入待检</el-button>
+            </template>
+          </el-popconfirm>
+
+          <el-popconfirm
+            v-if="canExecute && row.status === 3"
+            :title="`确认质检通过并入库吗？将增加库存并生成 WMS 入库单。`"
+            confirm-button-text="通过并入库"
             cancel-button-text="取消"
             confirm-button-type="danger"
             width="360"
             @confirm="execute(row.id)"
           >
             <template #reference>
-              <el-button link type="danger" :loading="executingId === row.id">执行</el-button>
+              <el-button link type="danger" :loading="executingId === row.id">质检通过</el-button>
             </template>
           </el-popconfirm>
 
+          <el-button
+            v-if="canQcReject && row.status === 3"
+            link
+            type="danger"
+            :loading="qcRejectingId === row.id"
+            @click="openQcReject(row)"
+          >
+            不合格
+          </el-button>
+
           <el-popconfirm
-            v-if="canCancel && (row.status === 1 || row.status === 2)"
+            v-if="canCancel && (row.status === 1 || row.status === 2 || row.status === 3)"
             :title="`确认作废退货单 ${row.returnNo} 吗？`"
             confirm-button-text="作废"
             cancel-button-text="取消"
@@ -91,15 +120,31 @@
 
   <el-dialog v-model="createVisible" title="新建退货单" width="1000px">
     <el-form :model="createForm" label-width="90px">
-      <el-form-item label="客户">
-        <el-select v-model="createForm.customerId" clearable filterable placeholder="请选择客户" style="width: 360px">
-          <el-option v-for="c in customers" :key="c.id" :label="`${c.partnerName} (${c.partnerCode})`" :value="c.id" />
+      <el-form-item label="发货批次">
+        <el-select
+          v-model="createForm.shipId"
+          clearable
+          filterable
+          remote
+          placeholder="搜索 发货单号/销售订单号/客户/WMS单号"
+          style="width: 680px"
+          :remote-method="searchShips"
+          :loading="shipLoading"
+          @change="onShipChange"
+        >
+          <el-option
+            v-for="s in shipOptions"
+            :key="s.id"
+            :label="`${s.shipNo} | ${s.orderNo || '-'} | ${s.customerName || '-'} | ${s.warehouseName || '-'}`"
+            :value="s.id"
+          />
         </el-select>
       </el-form-item>
+      <el-form-item label="客户">
+        <span>{{ sourceShip?.header?.customerName || '-' }}</span>
+      </el-form-item>
       <el-form-item label="仓库">
-        <el-select v-model="createForm.warehouseId" clearable filterable placeholder="请选择仓库" style="width: 360px">
-          <el-option v-for="w in warehouses" :key="w.id" :label="`${w.warehouseName} (${w.warehouseCode})`" :value="w.id" />
-        </el-select>
+        <span>{{ sourceShip?.header?.warehouseName || '-' }}</span>
       </el-form-item>
       <el-form-item label="日期">
         <el-date-picker v-model="createForm.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 200px" />
@@ -110,51 +155,35 @@
 
       <el-form-item label="明细">
         <div style="width: 100%">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
-            <div style="color: #666">至少 1 行。</div>
-            <el-button @click="addLine">新增行</el-button>
-          </div>
-          <el-table :data="createForm.lines" border size="small">
-            <el-table-column label="商品" min-width="320">
-              <template #default="{ row }">
-                <el-select
-                  v-model="row.productId"
-                  clearable
-                  filterable
-                  remote
-                  placeholder="搜索商品"
-                  style="width: 100%"
-                  :remote-method="searchProducts"
-                  :loading="productLoading"
-                >
-                  <el-option
-                    v-for="p in productOptions"
-                    :key="p.id"
-                    :label="`${p.productCode} | ${p.productName}`"
-                    :value="p.id"
-                  />
-                </el-select>
-              </template>
+          <el-table :data="returnLines" border size="small">
+            <el-table-column prop="productCode" label="SKU" width="160" />
+            <el-table-column prop="productName" label="商品名称" min-width="240" />
+            <el-table-column prop="unit" label="单位" width="80" />
+            <el-table-column label="本批次发货" width="140">
+              <template #default="{ row }">{{ fmtQty(row.shippedQty) }}</template>
             </el-table-column>
-            <el-table-column label="单价" width="160">
-              <template #default="{ row }">
-                <el-input-number v-model="row.price" :min="0" :precision="2" :step="1" controls-position="right" style="width: 140px" />
-              </template>
+            <el-table-column label="已退" width="120">
+              <template #default="{ row }">{{ fmtQty(row.returnedQty) }}</template>
             </el-table-column>
-            <el-table-column label="数量" width="180">
-              <template #default="{ row }">
-                <el-input-number v-model="row.qty" :min="0.001" :precision="3" :step="1" controls-position="right" style="width: 160px" />
-              </template>
+            <el-table-column label="可退" width="120">
+              <template #default="{ row }">{{ fmtQty(row.returnableQty) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="90">
-              <template #default="{ $index }">
-                <el-button link type="danger" @click="removeLine($index)">删除</el-button>
+            <el-table-column label="本次退货" width="180">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="row.qty"
+                  :min="0"
+                  :max="row.returnableQty"
+                  :precision="3"
+                  :step="1"
+                  controls-position="right"
+                />
               </template>
             </el-table-column>
           </el-table>
 
           <div style="display: flex; justify-content: flex-end; margin-top: 10px; font-weight: 600">
-            合计：{{ formatAmount(totalAmount) }}
+            本次退货数量合计：{{ fmtQty(totalReturnQty) }}
           </div>
         </div>
       </el-form-item>
@@ -173,11 +202,15 @@
         <el-descriptions-item label="单号">{{ detail.header.returnNo }}</el-descriptions-item>
         <el-descriptions-item label="客户">{{ detail.header.customerName }}</el-descriptions-item>
         <el-descriptions-item label="仓库">{{ detail.header.warehouseName }}</el-descriptions-item>
+        <el-descriptions-item label="发货批次">{{ detail.header.shipNo || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="销售订单">{{ detail.header.orderNo || '-' }}</el-descriptions-item>
         <el-descriptions-item label="日期">{{ detail.header.returnDate }}</el-descriptions-item>
-        <el-descriptions-item label="总额">{{ detail.header.totalAmount }}</el-descriptions-item>
+        <el-descriptions-item label="总额">{{ canPriceView ? detail.header.totalAmount ?? '-' : '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag v-if="detail.header.status === 4" type="success">已完成</el-tag>
-          <el-tag v-else-if="detail.header.status === 2" type="info">已审核</el-tag>
+          <el-tag v-else-if="detail.header.status === 3" type="warning">待质检</el-tag>
+          <el-tag v-else-if="detail.header.status === 2" type="info">待收货</el-tag>
+          <el-tag v-else-if="detail.header.status === 5" type="danger">不合格</el-tag>
           <el-tag v-else-if="detail.header.status === 9" type="danger">已作废</el-tag>
           <el-tag v-else type="warning">待审核</el-tag>
         </el-descriptions-item>
@@ -195,28 +228,62 @@
         <el-table-column prop="productCode" label="SKU" width="160" />
         <el-table-column prop="productName" label="商品名称" min-width="240" />
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column prop="price" label="单价" width="120" />
+        <el-table-column label="单价" width="120">
+          <template #default="{ row }">{{ canPriceView ? row.price ?? '-' : '-' }}</template>
+        </el-table-column>
         <el-table-column prop="qty" label="数量" width="120" />
-        <el-table-column prop="amount" label="金额" width="120" />
+        <el-table-column label="金额" width="120">
+          <template #default="{ row }">{{ canPriceView ? row.amount ?? '-' : '-' }}</template>
+        </el-table-column>
       </el-table>
     </div>
+  </el-dialog>
+
+  <el-dialog v-model="qcRejectVisible" title="质检不合格" width="520px">
+    <el-form :model="qcRejectForm" label-width="100px">
+      <el-form-item label="处置方式">
+        <el-select v-model="qcRejectForm.disposition" placeholder="请选择" style="width: 280px">
+          <el-option label="退回客户" value="RETURN_TO_CUSTOMER" />
+          <el-option label="报废" value="SCRAP" />
+          <el-option label="返修" value="REPAIR" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="备注">
+        <el-input v-model="qcRejectForm.remark" type="textarea" :rows="3" placeholder="可选" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="qcRejectVisible = false">取消</el-button>
+      <el-button type="danger" :loading="qcRejectSubmitting" @click="submitQcReject">确认不合格</el-button>
+    </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
-import { http } from '../api/http'
-import { auditSalesReturn, cancelSalesReturn, createSalesReturn, executeSalesReturn, getSalesReturn, listSalesReturns, type SalReturn, type SalReturnDetail } from '../api/sales-return'
-import { listProductOptions, listWarehouseOptions, type ProductOption, type WarehouseOption } from '../api/wms'
+import {
+  auditSalesReturn,
+  cancelSalesReturn,
+  createSalesReturn,
+  executeSalesReturn,
+  getSalesReturn,
+  listSalesReturns,
+  qcRejectSalesReturn,
+  receiveSalesReturn,
+  type SalReturn,
+  type SalReturnDetail
+} from '../api/sales-return'
+import { getSalesShip, listSalesShips, type SalShip, type SalShipDetail } from '../api/sales-ship'
 import { useAuthStore } from '../stores/auth'
 
-type PartnerOption = { id: number; partnerCode: string; partnerName: string; type: number }
-
 const auth = useAuthStore()
+const canPriceView = computed(() => auth.hasPerm('sal:price:view') || auth.hasPerm('sal:price:edit'))
 const canAdd = computed(() => auth.hasPerm('sal:return:add'))
 const canAudit = computed(() => auth.hasPerm('sal:return:audit'))
+const canReceive = computed(() => auth.hasPerm('sal:return:receive'))
 const canExecute = computed(() => auth.hasPerm('sal:return:execute'))
+const canQcReject = computed(() => auth.hasPerm('sal:return:qc-reject'))
 const canCancel = computed(() => auth.hasPerm('sal:return:cancel'))
 const canCreate = computed(() => canAdd.value)
 
@@ -227,35 +294,49 @@ const page = ref(0)
 const size = ref(20)
 const total = ref(0)
 
-const customers = ref<PartnerOption[]>([])
-const warehouses = ref<WarehouseOption[]>([])
-
 const createVisible = ref(false)
 const saving = ref(false)
+const shipLoading = ref(false)
+const shipOptions = ref<SalShip[]>([])
+const sourceShip = ref<SalShipDetail | null>(null)
+
+type ReturnLine = {
+  shipDetailId: number
+  productId: number
+  productCode?: string | null
+  productName?: string | null
+  unit?: string | null
+  shippedQty: number
+  returnedQty: number
+  returnableQty: number
+  qty: number
+}
+const returnLines = ref<ReturnLine[]>([])
+
 const createForm = ref<{
-  customerId?: number
-  warehouseId?: number
+  shipId?: number
   returnDate: string
   remark?: string
-  lines: { productId?: number; qty: number; price?: number | null }[]
 }>({
-  customerId: undefined,
-  warehouseId: undefined,
+  shipId: undefined,
   returnDate: new Date().toISOString().slice(0, 10),
-  remark: '',
-  lines: [{ productId: undefined, qty: 1, price: 0 }]
+  remark: ''
 })
-
-const productLoading = ref(false)
-const productOptions = ref<ProductOption[]>([])
 
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<SalReturnDetail | null>(null)
 
 const auditingId = ref<number | null>(null)
+const receivingId = ref<number | null>(null)
 const executingId = ref<number | null>(null)
 const cancelingId = ref<number | null>(null)
+const qcRejectingId = ref<number | null>(null)
+
+const qcRejectVisible = ref(false)
+const qcRejectSubmitting = ref(false)
+const qcRejectTarget = ref<SalReturn | null>(null)
+const qcRejectForm = ref<{ disposition: string; remark: string }>({ disposition: 'RETURN_TO_CUSTOMER', remark: '' })
 
 async function reload() {
   loading.value = true
@@ -295,52 +376,83 @@ async function openDetail(id: number) {
 async function openCreate() {
   createVisible.value = true
   createForm.value = {
-    customerId: undefined,
-    warehouseId: undefined,
+    shipId: undefined,
     returnDate: new Date().toISOString().slice(0, 10),
-    remark: '',
-    lines: [{ productId: undefined, qty: 1, price: 0 }]
+    remark: ''
   }
-  await Promise.all([loadCustomers(), loadWarehouses()])
+  shipOptions.value = []
+  sourceShip.value = null
+  returnLines.value = []
 }
 
-function addLine() {
-  createForm.value.lines.push({ productId: undefined, qty: 1, price: 0 })
+function num(v: any) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
 }
 
-function removeLine(index: number) {
-  if (createForm.value.lines.length <= 1) return
-  createForm.value.lines.splice(index, 1)
+function fmtQty(v: any) {
+  const n = num(v)
+  if (!Number.isFinite(n)) return '-'
+  const s = n.toFixed(3)
+  return s.replace(/\.?0+$/, '')
 }
 
-const totalAmount = computed(() => {
-  let sum = 0
-  for (const l of createForm.value.lines) {
-    const qty = Number(l.qty || 0)
-    const price = Number(l.price || 0)
-    sum += qty * price
+const totalReturnQty = computed(() => returnLines.value.reduce((sum, l) => sum + num(l.qty), 0))
+
+async function searchShips(query: string) {
+  shipLoading.value = true
+  try {
+    const res = await listSalesShips({ page: 0, size: 20, keyword: query || undefined })
+    shipOptions.value = res.content || []
+  } catch {
+    shipOptions.value = []
+  } finally {
+    shipLoading.value = false
   }
-  return sum
-})
+}
 
-function formatAmount(v: number) {
-  if (!Number.isFinite(v)) return '-'
-  return v.toFixed(2).replace(/\.?0+$/, '')
+async function onShipChange() {
+  const shipId = createForm.value.shipId
+  sourceShip.value = null
+  returnLines.value = []
+  if (!shipId) return
+  try {
+    const d = await getSalesShip(shipId)
+    sourceShip.value = d
+    returnLines.value =
+      d?.items?.map((it) => ({
+        shipDetailId: it.id,
+        productId: it.productId,
+        productCode: it.productCode,
+        productName: it.productName,
+        unit: it.unit,
+        shippedQty: num(it.qty),
+        returnedQty: num(it.returnedQty),
+        returnableQty: num(it.returnableQty),
+        qty: 0
+      })) || []
+  } catch (e: any) {
+    sourceShip.value = null
+    returnLines.value = []
+    ElMessage.error(e?.response?.data?.message || '加载发货批次失败')
+  }
 }
 
 async function submitCreate() {
-  if (!createForm.value.customerId) return ElMessage.error('请选择客户')
-  if (!createForm.value.warehouseId) return ElMessage.error('请选择仓库')
-  const lines = createForm.value.lines
-    .filter((l) => l.productId && Number(l.qty) > 0)
-    .map((l) => ({ productId: l.productId as number, qty: Number(l.qty), price: l.price == null ? null : Number(l.price) }))
+  if (!createForm.value.shipId) return ElMessage.error('请选择发货批次')
+  if (!sourceShip.value?.header?.customerId) return ElMessage.error('发货批次缺少客户信息')
+  if (!sourceShip.value?.header?.warehouseId) return ElMessage.error('发货批次缺少仓库信息')
+  const lines = returnLines.value
+    .filter((l) => l.shipDetailId && num(l.qty) > 0)
+    .map((l) => ({ shipDetailId: l.shipDetailId, qty: num(l.qty) }))
   if (lines.length <= 0) return ElMessage.error('请至少填写 1 行商品')
 
   saving.value = true
   try {
     const res = await createSalesReturn({
-      customerId: createForm.value.customerId,
-      warehouseId: createForm.value.warehouseId,
+      shipId: createForm.value.shipId,
+      customerId: sourceShip.value.header.customerId,
+      warehouseId: sourceShip.value.header.warehouseId,
       returnDate: createForm.value.returnDate,
       remark: createForm.value.remark,
       lines
@@ -368,6 +480,19 @@ async function audit(id: number) {
   }
 }
 
+async function receive(id: number) {
+  receivingId.value = id
+  try {
+    await receiveSalesReturn(id)
+    ElMessage.success('已收货入待检')
+    reload()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '收货失败')
+  } finally {
+    receivingId.value = null
+  }
+}
+
 async function execute(id: number) {
   executingId.value = id
   try {
@@ -378,6 +503,31 @@ async function execute(id: number) {
     ElMessage.error(e?.response?.data?.message || '执行失败')
   } finally {
     executingId.value = null
+  }
+}
+
+function openQcReject(row: SalReturn) {
+  qcRejectTarget.value = row
+  qcRejectForm.value = { disposition: 'RETURN_TO_CUSTOMER', remark: '' }
+  qcRejectVisible.value = true
+}
+
+async function submitQcReject() {
+  const row = qcRejectTarget.value
+  if (!row?.id) return
+  if (!qcRejectForm.value.disposition) return ElMessage.error('请选择处置方式')
+  qcRejectSubmitting.value = true
+  qcRejectingId.value = row.id
+  try {
+    await qcRejectSalesReturn(row.id, { disposition: qcRejectForm.value.disposition, remark: qcRejectForm.value.remark || undefined })
+    ElMessage.success('已标记不合格')
+    qcRejectVisible.value = false
+    reload()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '操作失败')
+  } finally {
+    qcRejectSubmitting.value = false
+    qcRejectingId.value = null
   }
 }
 
@@ -394,28 +544,7 @@ async function cancel(id: number) {
   }
 }
 
-async function searchProducts(query: string) {
-  productLoading.value = true
-  try {
-    productOptions.value = await listProductOptions({ keyword: query || undefined, limit: 200 })
-  } catch {
-    productOptions.value = []
-  } finally {
-    productLoading.value = false
-  }
-}
-
-async function loadCustomers() {
-  const res = await http.get<PartnerOption[]>('/api/base/partners/options', { params: { limit: 800 } })
-  customers.value = (res.data || []).filter((p) => p.type === 2)
-}
-
-async function loadWarehouses() {
-  warehouses.value = await listWarehouseOptions({ limit: 200 })
-}
-
 onMounted(() => {
   reload()
 })
 </script>
-

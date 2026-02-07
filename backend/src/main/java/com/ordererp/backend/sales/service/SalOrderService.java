@@ -74,13 +74,15 @@ public class SalOrderService {
     private final WmsIoBillRepository ioBillRepository;
     private final WmsIoBillDetailRepository ioBillDetailRepository;
     private final WmsStockLogRepository stockLogRepository;
+    private final SalCreditService creditService;
 
     public SalOrderService(SalOrderRepository orderRepository, SalOrderDetailRepository detailRepository,
             SalShipRepository shipRepository, SalShipDetailRepository shipDetailRepository,
             BasePartnerRepository partnerRepository, BaseWarehouseRepository warehouseRepository, BaseProductRepository productRepository,
             WmsStockRepository stockRepository,
             WmsIoBillRepository ioBillRepository, WmsIoBillDetailRepository ioBillDetailRepository,
-            WmsStockLogRepository stockLogRepository) {
+            WmsStockLogRepository stockLogRepository,
+            SalCreditService creditService) {
         this.orderRepository = orderRepository;
         this.detailRepository = detailRepository;
         this.shipRepository = shipRepository;
@@ -92,6 +94,7 @@ public class SalOrderService {
         this.ioBillRepository = ioBillRepository;
         this.ioBillDetailRepository = ioBillDetailRepository;
         this.stockLogRepository = stockLogRepository;
+        this.creditService = creditService;
     }
 
     public Page<SalOrderResponse> page(String keyword, Long customerId, LocalDate startDate, LocalDate endDate, Pageable pageable) {
@@ -180,7 +183,9 @@ public class SalOrderService {
                         r.getProductCode(),
                         r.getProductName(),
                         r.getUnit(),
-                        r.getQty()))
+                        r.getQty(),
+                        null,
+                        null))
                 .toList();
         return new SalShipDetailResponse(toShipResponse(header), items);
     }
@@ -268,11 +273,34 @@ public class SalOrderService {
     }
 
     /**
+     * 一键闭环：创建订单 -> 审核锁库 -> 全量发货。
+     *
+     * <p>与前端三次调用（create/audit/ship）相比，此方法能保证“中途失败则整单回滚”，避免产生无意义的草稿单。</p>
+     */
+    @Transactional
+    public SalOrderResponse quickShip(SalOrderCreateRequest request, String operator) {
+        SalOrderResponse created = create(request, operator);
+        audit(created.id(), operator);
+        return ship(created.id(), operator);
+    }
+
+    /**
+     * 一键生成并审核（锁库）：创建订单 -> 审核锁库。
+     *
+     * <p>用于“先锁库、后分批发货”的场景；失败会整单回滚，避免产生无意义草稿单。</p>
+     */
+    @Transactional
+    public SalOrderResponse quickAudit(SalOrderCreateRequest request, String operator) {
+        SalOrderResponse created = create(request, operator);
+        return audit(created.id(), operator);
+    }
+
+    /**
      * 审核：锁定库存（locked_qty += qty）。重复审核幂等返回。
      */
     @Transactional
     public SalOrderResponse audit(Long id, String operator) {
-        SalOrder o = orderRepository.findById(id)
+        SalOrder o = orderRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "销售订单不存在"));
         if (Objects.equals(o.getStatus(), STATUS_AUDITED) || Objects.equals(o.getStatus(), STATUS_PARTIAL_SHIPPED) || Objects.equals(o.getStatus(), STATUS_SHIPPED)) {
             return toResponse(orderRepository.getDetailRow(o.getId()));
@@ -287,6 +315,8 @@ public class SalOrderService {
         List<SalOrderDetail> items = detailRepository.findByOrderIdOrderByIdAsc(o.getId());
         if (items == null || items.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单无明细");
 
+        creditService.checkIncrease(o.getCustomerId(), o.getTotalAmount(), "审核销售订单");
+
         for (SalOrderDetail it : items) {
             if (it == null) continue;
             lockStockWithRetry(o.getWarehouseId(), it.getProductId(), safeQty(it.getQty()));
@@ -300,13 +330,37 @@ public class SalOrderService {
     }
 
     /**
+     * 删除草稿订单：用于清理“快速出库失败”产生的无意义草稿单。
+     *
+     * <p>约束：</p>
+     * <ul>
+     *   <li>仅允许删除草稿（status=1）</li>
+     *   <li>若已产生发货批次（sal_ship），禁止删除</li>
+     * </ul>
+     */
+    @Transactional
+    public void deleteDraft(Long id) {
+        SalOrder o = orderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "销售订单不存在"));
+        if (!Objects.equals(o.getStatus(), STATUS_DRAFT)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "仅草稿订单允许删除");
+        }
+        if (shipRepository.findByOrderIdOrderByIdAsc(o.getId()).stream().findAny().isPresent()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该订单已产生发货记录，不允许删除");
+        }
+        detailRepository.deleteByOrderId(o.getId());
+        orderRepository.delete(o);
+        orderRepository.flush();
+    }
+
+    /**
      * 一键全量发货：默认把所有“未发数量”一次发完（会生成一张发货批次单/一张 WMS 销售出库单）。
      *
      * <p>重复发货幂等：若已生成 wmsBillId/wmsBillNo 则直接返回。</p>
      */
     @Transactional
     public SalOrderResponse ship(Long id, String operator) {
-        SalOrder o = orderRepository.findById(id)
+        SalOrder o = orderRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "销售订单不存在"));
         if (Objects.equals(o.getStatus(), STATUS_SHIPPED)) {
             return toResponse(orderRepository.getDetailRow(o.getId()));
@@ -337,7 +391,7 @@ public class SalOrderService {
             if (remain.compareTo(BigDecimal.ZERO) <= 0) continue;
             lines.add(new ShipLine(it.getId(), it.getProductId(), remain));
         }
-        shipBatchInternal(o, items, lines, operator);
+        shipBatchInternal(null, o, items, lines, operator);
         return toResponse(orderRepository.getDetailRow(o.getId()));
     }
 
@@ -346,7 +400,7 @@ public class SalOrderService {
      */
     @Transactional
     public SalOrderResponse cancel(Long id, String operator) {
-        SalOrder o = orderRepository.findById(id)
+        SalOrder o = orderRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "销售订单不存在"));
         if (Objects.equals(o.getStatus(), STATUS_CANCELED)) return toResponse(orderRepository.getDetailRow(o.getId()));
         if (Objects.equals(o.getStatus(), STATUS_SHIPPED)) {
@@ -482,25 +536,35 @@ public class SalOrderService {
     }
 
     @Transactional
-    public void shipBatch(Long orderId, List<ShipLine> lines, String operator) {
+    public void shipBatch(Long orderId, String requestNo, List<ShipLine> lines, String operator) {
         if (lines == null || lines.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "lines is required");
         }
+        String req = trimToNull(requestNo);
+        if (req == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "requestNo is required");
 
-        SalOrder o = orderRepository.findById(orderId)
+        SalOrder o = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "销售订单不存在"));
         if (Objects.equals(o.getStatus(), STATUS_CANCELED)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已作废");
         if (!Objects.equals(o.getStatus(), STATUS_AUDITED) && !Objects.equals(o.getStatus(), STATUS_PARTIAL_SHIPPED)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单未处于可发货状态");
         }
 
+        SalShip existingShip = shipRepository.findFirstByRequestNo(req).orElse(null);
+        if (existingShip != null) {
+            if (!Objects.equals(existingShip.getOrderId(), o.getId())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "requestNo already used by another order");
+            }
+            return;
+        }
+
         List<SalOrderDetail> items = detailRepository.findByOrderIdOrderByIdAsc(o.getId());
         if (items == null || items.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单无明细");
 
-        shipBatchInternal(o, items, lines, operator);
+        shipBatchInternal(req, o, items, lines, operator);
     }
 
-    private void shipBatchInternal(SalOrder o, List<SalOrderDetail> items, List<ShipLine> lines, String operator) {
+    private void shipBatchInternal(String requestNo, SalOrder o, List<SalOrderDetail> items, List<ShipLine> lines, String operator) {
         // Validate lines and compute remain
         Set<Long> seen = new HashSet<>();
         BigDecimal totalQty = BigDecimal.ZERO;
@@ -510,6 +574,7 @@ public class SalOrderService {
         String shipNo = generateShipNo();
         SalShip ship = new SalShip();
         ship.setShipNo(shipNo);
+        ship.setRequestNo(trimToNull(requestNo));
         ship.setOrderId(o.getId());
         ship.setOrderNo(o.getOrderNo());
         ship.setCustomerId(o.getCustomerId());
@@ -520,7 +585,19 @@ public class SalOrderService {
         ship.setTotalQty(BigDecimal.ZERO);
         ship.setCreateBy(trimToNull(operator));
         ship.setCreateTime(now);
-        ship = shipRepository.saveAndFlush(ship);
+        try {
+            ship = shipRepository.saveAndFlush(ship);
+        } catch (DataIntegrityViolationException e) {
+            String req = trimToNull(requestNo);
+            SalShip existing = req == null ? null : shipRepository.findFirstByRequestNo(req).orElse(null);
+            if (existing != null) {
+                if (!Objects.equals(existing.getOrderId(), o.getId())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "requestNo already used by another order");
+                }
+                return;
+            }
+            throw e;
+        }
 
         // Deduct stock (and unlock) and update shipped_qty
         for (ShipLine line : lines) {

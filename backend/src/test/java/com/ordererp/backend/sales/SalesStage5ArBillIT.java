@@ -20,6 +20,8 @@ import com.ordererp.backend.sales.dto.SalReturnLineRequest;
 import com.ordererp.backend.sales.service.SalArBillService;
 import com.ordererp.backend.sales.service.SalOrderService;
 import com.ordererp.backend.sales.service.SalReturnService;
+import com.ordererp.backend.sales.repository.SalShipDetailRepository;
+import com.ordererp.backend.sales.repository.SalShipRepository;
 import com.ordererp.backend.wms.entity.WmsStock;
 import com.ordererp.backend.wms.repository.WmsStockRepository;
 import java.math.BigDecimal;
@@ -72,6 +74,12 @@ class SalesStage5ArBillIT {
     SalReturnService returnService;
 
     @Autowired
+    SalShipRepository shipRepository;
+
+    @Autowired
+    SalShipDetailRepository shipDetailRepository;
+
+    @Autowired
     SalArBillService arBillService;
 
     @Autowired
@@ -118,18 +126,24 @@ class SalesStage5ArBillIT {
         var shipped = orderService.ship(order.id(), "shipper");
         assertTrue(shipped.status() == 3 || shipped.status() == 4);
 
+        var ship = shipRepository.findByOrderIdOrderByIdAsc(order.id()).stream().findFirst().orElseThrow();
+        var shipDetail = shipDetailRepository.findByShipIdOrderByIdAsc(ship.getId()).stream().findFirst().orElseThrow();
+
         var sret = returnService.create(new SalReturnCreateRequest(
+                ship.getId(),
                 customer.getId(),
                 wh.getId(),
                 LocalDate.now(),
                 "tc sales return",
-                List.of(new SalReturnLineRequest(p.getId(), new BigDecimal("1.000"), new BigDecimal("12.00")))), "tester");
+                List.of(new SalReturnLineRequest(shipDetail.getId(), new BigDecimal("1.000")))), "tester");
         assertNotNull(sret.id());
         assertEquals(1, sret.status());
         assertTrue(sret.totalAmount().compareTo(new BigDecimal("12.00")) == 0);
 
         var sretAudited = returnService.audit(sret.id(), "auditor");
         assertEquals(2, sretAudited.status());
+        var sretReceived = returnService.receive(sret.id(), "receiver");
+        assertEquals(3, sretReceived.status());
         var sretExec = returnService.execute(sret.id(), "operator");
         assertEquals(4, sretExec.status());
 
@@ -207,4 +221,3 @@ class SalesStage5ArBillIT {
         return productRepository.saveAndFlush(p);
     }
 }
-

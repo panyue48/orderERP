@@ -32,6 +32,18 @@ public class SalReturn {
     @Column(name = "warehouse_id", nullable = false)
     private Long warehouseId;
 
+    @Column(name = "ship_id")
+    private Long shipId;
+
+    @Column(name = "ship_no")
+    private String shipNo;
+
+    @Column(name = "order_id")
+    private Long orderId;
+
+    @Column(name = "order_no")
+    private String orderNo;
+
     @Column(name = "return_date", nullable = false)
     private LocalDate returnDate;
 
@@ -59,6 +71,24 @@ public class SalReturn {
 
     @Column(name = "audit_time")
     private LocalDateTime auditTime;
+
+    @Column(name = "receive_by")
+    private String receiveBy;
+
+    @Column(name = "receive_time")
+    private LocalDateTime receiveTime;
+
+    @Column(name = "qc_by")
+    private String qcBy;
+
+    @Column(name = "qc_time")
+    private LocalDateTime qcTime;
+
+    @Column(name = "qc_disposition")
+    private String qcDisposition;
+
+    @Column(name = "qc_remark")
+    private String qcRemark;
 
     @Column(name = "execute_by")
     private String executeBy;
@@ -112,6 +142,38 @@ public class SalReturn {
 
     public void setWarehouseId(Long warehouseId) {
         this.warehouseId = warehouseId;
+    }
+
+    public Long getShipId() {
+        return shipId;
+    }
+
+    public void setShipId(Long shipId) {
+        this.shipId = shipId;
+    }
+
+    public String getShipNo() {
+        return shipNo;
+    }
+
+    public void setShipNo(String shipNo) {
+        this.shipNo = shipNo;
+    }
+
+    public Long getOrderId() {
+        return orderId;
+    }
+
+    public void setOrderId(Long orderId) {
+        this.orderId = orderId;
+    }
+
+    public String getOrderNo() {
+        return orderNo;
+    }
+
+    public void setOrderNo(String orderNo) {
+        this.orderNo = orderNo;
     }
 
     public LocalDate getReturnDate() {
@@ -194,6 +256,54 @@ public class SalReturn {
         this.auditTime = auditTime;
     }
 
+    public String getReceiveBy() {
+        return receiveBy;
+    }
+
+    public void setReceiveBy(String receiveBy) {
+        this.receiveBy = receiveBy;
+    }
+
+    public LocalDateTime getReceiveTime() {
+        return receiveTime;
+    }
+
+    public void setReceiveTime(LocalDateTime receiveTime) {
+        this.receiveTime = receiveTime;
+    }
+
+    public String getQcBy() {
+        return qcBy;
+    }
+
+    public void setQcBy(String qcBy) {
+        this.qcBy = qcBy;
+    }
+
+    public LocalDateTime getQcTime() {
+        return qcTime;
+    }
+
+    public void setQcTime(LocalDateTime qcTime) {
+        this.qcTime = qcTime;
+    }
+
+    public String getQcDisposition() {
+        return qcDisposition;
+    }
+
+    public void setQcDisposition(String qcDisposition) {
+        this.qcDisposition = qcDisposition;
+    }
+
+    public String getQcRemark() {
+        return qcRemark;
+    }
+
+    public void setQcRemark(String qcRemark) {
+        this.qcRemark = qcRemark;
+    }
+
     public String getExecuteBy() {
         return executeBy;
     }
@@ -210,4 +320,3 @@ public class SalReturn {
         this.executeTime = executeTime;
     }
 }
-

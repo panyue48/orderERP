@@ -12,7 +12,33 @@ public interface SalReturnDetailRepository extends JpaRepository<SalReturnDetail
 
     @Query(value = """
             select
+              d.ship_detail_id as shipDetailId,
+              coalesce(sum(d.qty), 0.000) as returnedQty
+            from sal_return_detail d
+            join sal_return r on r.id = d.return_id
+            where d.ship_detail_id in (:shipDetailIds)
+              and r.status not in (5, 9)
+            group by d.ship_detail_id
+            """, nativeQuery = true)
+    List<ShipDetailReturnedRow> sumReturnedQtyByShipDetailIds(@Param("shipDetailIds") List<Long> shipDetailIds);
+
+    @Query(value = """
+            select
+              d.ship_detail_id as shipDetailId,
+              coalesce(sum(d.qty), 0.000) as returnedQty
+            from sal_return_detail d
+            join sal_return r on r.id = d.return_id
+            where r.ship_id = :shipId
+              and r.status not in (5, 9)
+            group by d.ship_detail_id
+            """, nativeQuery = true)
+    List<ShipDetailReturnedRow> sumReturnedQtyByShipId(@Param("shipId") Long shipId);
+
+    @Query(value = """
+            select
               d.id as id,
+              d.ship_detail_id as shipDetailId,
+              d.order_detail_id as orderDetailId,
               d.product_id as productId,
               d.product_code as productCode,
               d.product_name as productName,
@@ -26,8 +52,18 @@ public interface SalReturnDetailRepository extends JpaRepository<SalReturnDetail
             """, nativeQuery = true)
     List<ReturnItemRow> listRows(@Param("returnId") Long returnId);
 
+    interface ShipDetailReturnedRow {
+        Long getShipDetailId();
+
+        BigDecimal getReturnedQty();
+    }
+
     interface ReturnItemRow {
         Long getId();
+
+        Long getShipDetailId();
+
+        Long getOrderDetailId();
 
         Long getProductId();
 
@@ -44,4 +80,3 @@ public interface SalReturnDetailRepository extends JpaRepository<SalReturnDetail
         BigDecimal getAmount();
     }
 }
-

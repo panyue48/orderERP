@@ -99,6 +99,34 @@ public interface SalOrderRepository extends JpaRepository<SalOrder, Long> {
     SalOrderDetailRow getDetailRow(@Param("id") Long id);
 
     @Query(value = """
+            select coalesce(
+              sum(coalesce(d.price, 0.00) * greatest(coalesce(d.qty, 0.00) - coalesce(d.shipped_qty, 0.00), 0.00)),
+              0.00
+            ) as amount
+            from sal_order o
+            join sal_order_detail d on d.order_id = o.id
+            where o.customer_id = :customerId
+              and o.status in (2, 3)
+              and (:excludeOrderId is null or o.id <> :excludeOrderId)
+            """, nativeQuery = true)
+    BigDecimal sumOpenRemainingAmountByCustomerId(@Param("customerId") Long customerId, @Param("excludeOrderId") Long excludeOrderId);
+
+    @Query(value = """
+            select
+              o.customer_id as customerId,
+              coalesce(
+                sum(coalesce(d.price, 0.00) * greatest(coalesce(d.qty, 0.00) - coalesce(d.shipped_qty, 0.00), 0.00)),
+                0.00
+              ) as amount
+            from sal_order o
+            join sal_order_detail d on d.order_id = o.id
+            where o.customer_id in (:customerIds)
+              and o.status in (2, 3)
+            group by o.customer_id
+            """, nativeQuery = true)
+    List<CustomerAmountRow> sumOpenRemainingAmountByCustomerIds(@Param("customerIds") List<Long> customerIds);
+
+    @Query(value = """
             select
               o.id as id,
               o.order_no as orderNo,

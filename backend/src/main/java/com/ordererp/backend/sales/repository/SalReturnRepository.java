@@ -27,6 +27,10 @@ public interface SalReturnRepository extends JpaRepository<SalReturn, Long> {
               r.customer_name as customerName,
               r.warehouse_id as warehouseId,
               w.warehouse_name as warehouseName,
+              r.ship_id as shipId,
+              r.ship_no as shipNo,
+              r.order_id as orderId,
+              r.order_no as orderNo,
               r.return_date as returnDate,
               coalesce((select sum(d.qty) from sal_return_detail d where d.return_id = r.id), 0) as totalQty,
               r.total_amount as totalAmount,
@@ -38,6 +42,12 @@ public interface SalReturnRepository extends JpaRepository<SalReturn, Long> {
               r.create_time as createTime,
               r.audit_by as auditBy,
               r.audit_time as auditTime,
+              r.receive_by as receiveBy,
+              r.receive_time as receiveTime,
+              r.qc_by as qcBy,
+              r.qc_time as qcTime,
+              r.qc_disposition as qcDisposition,
+              r.qc_remark as qcRemark,
               r.execute_by as executeBy,
               r.execute_time as executeTime
             from sal_return r
@@ -70,6 +80,10 @@ public interface SalReturnRepository extends JpaRepository<SalReturn, Long> {
               r.customer_name as customerName,
               r.warehouse_id as warehouseId,
               w.warehouse_name as warehouseName,
+              r.ship_id as shipId,
+              r.ship_no as shipNo,
+              r.order_id as orderId,
+              r.order_no as orderNo,
               r.return_date as returnDate,
               coalesce((select sum(d.qty) from sal_return_detail d where d.return_id = r.id), 0) as totalQty,
               r.total_amount as totalAmount,
@@ -81,6 +95,12 @@ public interface SalReturnRepository extends JpaRepository<SalReturn, Long> {
               r.create_time as createTime,
               r.audit_by as auditBy,
               r.audit_time as auditTime,
+              r.receive_by as receiveBy,
+              r.receive_time as receiveTime,
+              r.qc_by as qcBy,
+              r.qc_time as qcTime,
+              r.qc_disposition as qcDisposition,
+              r.qc_remark as qcRemark,
               r.execute_by as executeBy,
               r.execute_time as executeTime
             from sal_return r
@@ -104,6 +124,14 @@ public interface SalReturnRepository extends JpaRepository<SalReturn, Long> {
 
         String getWarehouseName();
 
+        Long getShipId();
+
+        String getShipNo();
+
+        Long getOrderId();
+
+        String getOrderNo();
+
         LocalDate getReturnDate();
 
         BigDecimal getTotalQty();
@@ -126,9 +154,20 @@ public interface SalReturnRepository extends JpaRepository<SalReturn, Long> {
 
         LocalDateTime getAuditTime();
 
+        String getReceiveBy();
+
+        LocalDateTime getReceiveTime();
+
+        String getQcBy();
+
+        LocalDateTime getQcTime();
+
+        String getQcDisposition();
+
+        String getQcRemark();
+
         String getExecuteBy();
 
         LocalDateTime getExecuteTime();
     }
 }
-

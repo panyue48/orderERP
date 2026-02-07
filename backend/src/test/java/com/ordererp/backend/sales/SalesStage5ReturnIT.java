@@ -2,6 +2,7 @@ package com.ordererp.backend.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ordererp.backend.base.entity.BasePartner;
@@ -10,8 +11,12 @@ import com.ordererp.backend.base.entity.BaseWarehouse;
 import com.ordererp.backend.base.repository.BasePartnerRepository;
 import com.ordererp.backend.base.repository.BaseProductRepository;
 import com.ordererp.backend.base.repository.BaseWarehouseRepository;
+import com.ordererp.backend.sales.dto.SalOrderCreateRequest;
 import com.ordererp.backend.sales.dto.SalReturnCreateRequest;
 import com.ordererp.backend.sales.dto.SalReturnLineRequest;
+import com.ordererp.backend.sales.repository.SalShipDetailRepository;
+import com.ordererp.backend.sales.repository.SalShipRepository;
+import com.ordererp.backend.sales.service.SalOrderService;
 import com.ordererp.backend.sales.service.SalReturnService;
 import com.ordererp.backend.wms.entity.WmsStock;
 import com.ordererp.backend.wms.repository.WmsIoBillDetailRepository;
@@ -28,6 +33,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -60,7 +66,16 @@ class SalesStage5ReturnIT {
     }
 
     @Autowired
+    SalOrderService orderService;
+
+    @Autowired
     SalReturnService returnService;
+
+    @Autowired
+    SalShipRepository shipRepository;
+
+    @Autowired
+    SalShipDetailRepository shipDetailRepository;
 
     @Autowired
     BasePartnerRepository partnerRepository;
@@ -90,35 +105,64 @@ class SalesStage5ReturnIT {
         BaseWarehouse wh = createWarehouse("WH-TC-SRET-1");
         BaseProduct p = createProduct("SKU-TC-SRET-1");
 
-        // start with 0 stock; sales return execute should upsert/increase stock
+        // Prepare stock for sales shipment.
         WmsStock stock = new WmsStock();
         stock.setWarehouseId(wh.getId());
         stock.setProductId(p.getId());
-        stock.setStockQty(BigDecimal.ZERO);
+        stock.setStockQty(new BigDecimal("10.000"));
         stock.setLockedQty(BigDecimal.ZERO);
         stock.setVersion(0);
         stock.setUpdateTime(LocalDateTime.now());
         stockRepository.saveAndFlush(stock);
 
+        var order = orderService.create(new SalOrderCreateRequest(
+                customer.getId(),
+                wh.getId(),
+                LocalDate.now(),
+                "tc sales order for return",
+                List.of(new SalOrderCreateRequest.SalOrderLineRequest(p.getId(), new BigDecimal("2.000"), new BigDecimal("10.00")))), "tester");
+        assertNotNull(order.id());
+
+        var auditedOrder = orderService.audit(order.id(), "auditor");
+        assertEquals(2, auditedOrder.status());
+        var shippedOrder = orderService.ship(order.id(), "shipper");
+        assertTrue(shippedOrder.status() == 3 || shippedOrder.status() == 4);
+
+        var ship = shipRepository.findByOrderIdOrderByIdAsc(order.id()).stream().findFirst().orElseThrow();
+        var shipDetail = shipDetailRepository.findByShipIdOrderByIdAsc(ship.getId()).stream().findFirst().orElseThrow();
+
         var created = returnService.create(new SalReturnCreateRequest(
+                ship.getId(),
                 customer.getId(),
                 wh.getId(),
                 LocalDate.now(),
                 "tc sales return",
-                List.of(new SalReturnLineRequest(p.getId(), new BigDecimal("2.000"), new BigDecimal("10.00")))), "tester");
+                List.of(new SalReturnLineRequest(shipDetail.getId(), new BigDecimal("2.000")))), "tester");
         assertNotNull(created.id());
         assertEquals(1, created.status());
         assertTrue(created.totalAmount().compareTo(new BigDecimal("20.00")) == 0);
 
+        ResponseStatusException overEx = assertThrows(ResponseStatusException.class, () -> returnService.create(new SalReturnCreateRequest(
+                ship.getId(),
+                customer.getId(),
+                wh.getId(),
+                LocalDate.now(),
+                "tc sales return over",
+                List.of(new SalReturnLineRequest(shipDetail.getId(), new BigDecimal("0.001")))), "tester"));
+        assertEquals(400, overEx.getStatusCode().value());
+
         var audited = returnService.audit(created.id(), "auditor");
         assertEquals(2, audited.status());
+
+        var received = returnService.receive(created.id(), "receiver");
+        assertEquals(3, received.status());
 
         var exec1 = returnService.execute(created.id(), "operator");
         assertEquals(4, exec1.status());
         assertNotNull(exec1.wmsBillNo());
 
         WmsStock stock1 = stockRepository.findFirstByWarehouseIdAndProductId(wh.getId(), p.getId()).orElseThrow();
-        assertTrue(stock1.getStockQty().compareTo(new BigDecimal("2.000")) == 0);
+        assertTrue(stock1.getStockQty().compareTo(new BigDecimal("10.000")) == 0);
 
         assertTrue(ioBillRepository.findFirstByBizIdAndType(created.id(), 6).isPresent());
         assertEquals(1, ioBillDetailRepository.findByBillId(exec1.wmsBillId()).size());
@@ -129,7 +173,7 @@ class SalesStage5ReturnIT {
         assertEquals(exec1.wmsBillNo(), exec2.wmsBillNo());
 
         WmsStock stock2 = stockRepository.findFirstByWarehouseIdAndProductId(wh.getId(), p.getId()).orElseThrow();
-        assertTrue(stock2.getStockQty().compareTo(new BigDecimal("2.000")) == 0);
+        assertTrue(stock2.getStockQty().compareTo(new BigDecimal("10.000")) == 0);
         assertEquals(1L, stockLogRepository.countByBizNoAndBizType(exec1.wmsBillNo(), "SALES_RETURN"));
     }
 
@@ -170,4 +214,3 @@ class SalesStage5ReturnIT {
         return productRepository.saveAndFlush(p);
     }
 }
-

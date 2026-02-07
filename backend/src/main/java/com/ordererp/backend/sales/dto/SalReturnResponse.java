@@ -12,6 +12,10 @@ public record SalReturnResponse(
         String customerName,
         Long warehouseId,
         String warehouseName,
+        Long shipId,
+        String shipNo,
+        Long orderId,
+        String orderNo,
         LocalDate returnDate,
         BigDecimal totalQty,
         BigDecimal totalAmount,
@@ -23,7 +27,12 @@ public record SalReturnResponse(
         LocalDateTime createTime,
         String auditBy,
         LocalDateTime auditTime,
+        String receiveBy,
+        LocalDateTime receiveTime,
+        String qcBy,
+        LocalDateTime qcTime,
+        String qcDisposition,
+        String qcRemark,
         String executeBy,
         LocalDateTime executeTime) {
 }
-

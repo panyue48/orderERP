@@ -41,6 +41,8 @@ export type SalShipItem = {
   productName?: string | null
   unit?: string | null
   qty?: string | number | null
+  returnedQty?: string | number | null
+  returnableQty?: string | number | null
 }
 
 export type SalShipDetail = { header: SalShip; items: SalShipItem[] }

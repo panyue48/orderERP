@@ -28,6 +28,7 @@
           <el-input v-model="keyword" placeholder="搜索发货单号/订单号/客户/WMS单号" style="width: 280px" clearable @keyup.enter="reload" />
           <el-button @click="reload">查询</el-button>
           <el-button v-if="canCreateOutbound" type="primary" @click="openCreateOutbound">新建销售出库</el-button>
+          <el-button v-if="canCreateOrder" type="warning" @click="openCreateOrder">新建销售订单(锁库)</el-button>
           <el-button v-if="canShipBatch || canShip" type="success" @click="openShipBatch()">新增发货批次</el-button>
         </div>
       </div>
@@ -71,12 +72,20 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="createVisible" title="新建销售出库（生成订单→锁库→发货）" width="980px">
+  <el-dialog
+    v-model="createVisible"
+    :title="createMode === 'auditOnly' ? '新建销售订单（锁库，后续分批发货）' : '新建销售出库（生成订单→锁库→发货）'"
+    width="980px"
+  >
     <el-alert
       type="info"
       show-icon
       :closable="false"
-      title="说明：此处用于快速完成“下单→审核锁库→发货扣库”。成功后会生成销售订单与对应的销售出库单（发货记录）。"
+      :title="
+        createMode === 'auditOnly'
+          ? '说明：此处仅完成“下单→审核锁库”，不发货。后续请用“新增发货批次”按需分批发货。'
+          : '说明：此处用于快速完成“下单→审核锁库→发货扣库”。成功后会生成销售订单与对应的销售出库单（发货记录）。'
+      "
       style="margin-bottom: 12px"
     />
     <el-form :model="createForm" label-width="110px">
@@ -84,6 +93,13 @@
         <el-select v-model="createForm.customerId" clearable filterable placeholder="请选择客户" style="width: 360px">
           <el-option v-for="c in customers" :key="c.id" :label="`${c.partnerName} (${c.partnerCode})`" :value="c.id" />
         </el-select>
+      </el-form-item>
+      <el-form-item label="信用额度">
+        <div v-loading="creditLoading" style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
+          <span>信用额度：{{ fmtMoney(creditUsage?.creditLimit) }}</span>
+          <span>已占用：{{ fmtMoney(creditUsage?.usedAmount) }}</span>
+          <span>可用：{{ fmtMoney(creditUsage?.availableAmount) }}</span>
+        </div>
       </el-form-item>
       <el-form-item label="发货仓库">
         <el-select v-model="createForm.warehouseId" clearable filterable placeholder="请选择仓库" style="width: 360px">
@@ -99,7 +115,11 @@
       <el-form-item label="明细">
         <div style="width: 100%">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
-            <div style="color: #666">至少 1 行。提交后会尝试自动审核锁库并发货。</div>
+            <div style="color: #666">
+              至少 1 行。{{
+                createMode === 'auditOnly' ? '提交后会尝试自动审核锁库（不发货）。' : '提交后会尝试自动审核锁库并发货。'
+              }}
+            </div>
             <el-button @click="addLine">新增行</el-button>
           </div>
           <el-table :data="createForm.lines" border size="small" style="width: 100%">
@@ -139,7 +159,9 @@
     </el-form>
     <template #footer>
       <el-button @click="createVisible = false">取消</el-button>
-      <el-button type="primary" :loading="creating" @click="submitCreateOutbound">提交</el-button>
+      <el-button type="primary" :loading="creating" @click="submitCreate">
+        {{ createMode === 'auditOnly' ? '提交并锁库' : '提交并发货' }}
+      </el-button>
     </template>
   </el-dialog>
 
@@ -236,13 +258,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { http } from '../api/http'
 import { listProductOptions, listWarehouseOptions, type ProductOption, type WarehouseOption } from '../api/wms'
 import { getSalesShip, listSalesShips, reverseSalesShip, type SalShip, type SalShipDetail } from '../api/sales-ship'
-import { auditSalesOrder, createSalesOrder, getSalesOrder, shipSalesOrder, shipSalesOrderBatch, type SalOrder, type SalOrderDetail } from '../api/sales'
+import {
+  getSalesCustomerCreditUsage,
+  getSalesOrder,
+  quickAuditSalesOrder,
+  quickShipSalesOrder,
+  shipSalesOrder,
+  shipSalesOrderBatch,
+  type SalCreditUsage,
+  type SalOrder,
+  type SalOrderDetail
+} from '../api/sales'
 import { useAuthStore } from '../stores/auth'
 
 type PartnerOption = { id: number; partnerCode: string; partnerName: string; type: number }
@@ -251,7 +283,10 @@ type OrderOption = { id: number; orderNo: string; customerName?: string | null; 
 const auth = useAuthStore()
 const route = useRoute()
 
-const canCreateOutbound = computed(() => auth.hasPerm('sal:order:add') && auth.hasPerm('sal:order:audit') && auth.hasPerm('sal:order:ship'))
+const canCreateOutbound = computed(
+  () => auth.hasPerm('sal:order:add') && auth.hasPerm('sal:price:edit') && auth.hasPerm('sal:order:audit') && auth.hasPerm('sal:order:ship')
+)
+const canCreateOrder = computed(() => auth.hasPerm('sal:order:add') && auth.hasPerm('sal:price:edit') && auth.hasPerm('sal:order:audit'))
 const canShip = computed(() => auth.hasPerm('sal:order:ship'))
 const canShipBatch = computed(() => auth.hasPerm('sal:order:ship-batch'))
 const canReverse = computed(() => auth.hasPerm('sal:ship:reverse'))
@@ -276,6 +311,9 @@ const detail = ref<SalShipDetail | null>(null)
 
 const createVisible = ref(false)
 const creating = ref(false)
+const creditLoading = ref(false)
+const creditUsage = ref<SalCreditUsage | null>(null)
+const createMode = ref<'quickShip' | 'auditOnly'>('quickShip')
 const createForm = ref<{
   customerId?: number
   warehouseId?: number
@@ -289,6 +327,19 @@ const createForm = ref<{
   remark: '',
   lines: [{ productId: undefined, qty: 1, price: undefined }]
 })
+
+function fmtMoney(v: any) {
+  if (v === null || v === undefined) return '-'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '-'
+  return n.toFixed(2).replace(/\.00$/, '')
+}
+
+function newRequestNo() {
+  const c: any = (globalThis as any).crypto
+  if (c?.randomUUID) return c.randomUUID()
+  return `REQ-${Date.now()}-${Math.floor(Math.random() * 1e9)}`
+}
 
 const productLoading = ref(false)
 const productOptions = ref<ProductOption[]>([])
@@ -311,6 +362,7 @@ const shipLines = ref<
     shipQty: number
   }[]
 >([])
+const shipRequestNo = ref<string>('')
 
 const orderLoading = ref(false)
 const orderOptions = ref<OrderOption[]>([])
@@ -381,6 +433,19 @@ async function reverseShip(row: SalShip) {
 }
 
 function openCreateOutbound() {
+  createMode.value = 'quickShip'
+  createForm.value = {
+    customerId: undefined,
+    warehouseId: undefined,
+    orderDate: undefined,
+    remark: '',
+    lines: [{ productId: undefined, qty: 1, price: undefined }]
+  }
+  createVisible.value = true
+}
+
+function openCreateOrder() {
+  createMode.value = 'auditOnly'
   createForm.value = {
     customerId: undefined,
     warehouseId: undefined,
@@ -410,7 +475,7 @@ async function searchProducts(query: string) {
   }
 }
 
-async function submitCreateOutbound() {
+async function submitCreate() {
   if (!createForm.value.customerId) return ElMessage.error('请选择客户')
   if (!createForm.value.warehouseId) return ElMessage.error('请选择发货仓库')
   if (!createForm.value.lines || createForm.value.lines.length === 0) return ElMessage.error('请至少填写 1 行明细')
@@ -424,18 +489,32 @@ async function submitCreateOutbound() {
 
   creating.value = true
   try {
-    const order: SalOrder = await createSalesOrder({
-      customerId: createForm.value.customerId!,
-      warehouseId: createForm.value.warehouseId!,
-      orderDate: createForm.value.orderDate || undefined,
-      remark: createForm.value.remark || undefined,
-      lines
-    })
-    await auditSalesOrder(order.id)
-    await shipSalesOrder(order.id)
-    ElMessage.success('销售出库已生成')
-    createVisible.value = false
-    await reload()
+    if (createMode.value === 'auditOnly') {
+      const order: SalOrder = await quickAuditSalesOrder({
+        customerId: createForm.value.customerId!,
+        warehouseId: createForm.value.warehouseId!,
+        orderDate: createForm.value.orderDate || undefined,
+        remark: createForm.value.remark || undefined,
+        lines
+      })
+      ElMessage.success('销售订单已审核(锁库)')
+      createVisible.value = false
+      await reload()
+      if (order?.id && canShipBatch.value) {
+        await openShipBatch(order.id)
+      }
+    } else {
+      await quickShipSalesOrder({
+        customerId: createForm.value.customerId!,
+        warehouseId: createForm.value.warehouseId!,
+        orderDate: createForm.value.orderDate || undefined,
+        remark: createForm.value.remark || undefined,
+        lines
+      })
+      ElMessage.success('销售出库已生成')
+      createVisible.value = false
+      await reload()
+    }
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '生成失败')
   } finally {
@@ -445,6 +524,7 @@ async function submitCreateOutbound() {
 
 async function openShipBatch(orderId?: number) {
   shipOrderId.value = orderId
+  shipRequestNo.value = newRequestNo()
   if (!canShipBatch.value && orderId && canShip.value) {
     shipping.value = true
     try {
@@ -550,10 +630,11 @@ async function submitShipBatch() {
     .filter((l) => l.shipQty && l.shipQty > 0)
     .map((l) => ({ orderDetailId: l.orderDetailId, productId: l.productId, qty: Number(l.shipQty) }))
   if (lines.length === 0) return ElMessage.error('请至少填写 1 行发货数量')
+  if (!shipRequestNo.value) shipRequestNo.value = newRequestNo()
 
   shipping.value = true
   try {
-    await shipSalesOrderBatch(shipOrderId.value, { lines })
+    await shipSalesOrderBatch(shipOrderId.value, { requestNo: shipRequestNo.value, lines })
     ElMessage.success('发货成功')
     shipVisible.value = false
     await reload()
@@ -592,4 +673,20 @@ onMounted(async () => {
   }
   await reload()
 })
+
+watch(
+  () => createForm.value.customerId,
+  async (id) => {
+    creditUsage.value = null
+    if (!id) return
+    creditLoading.value = true
+    try {
+      creditUsage.value = await getSalesCustomerCreditUsage(id)
+    } catch {
+      creditUsage.value = null
+    } finally {
+      creditLoading.value = false
+    }
+  }
+)
 </script>

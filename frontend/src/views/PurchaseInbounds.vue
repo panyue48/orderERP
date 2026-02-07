@@ -178,9 +178,10 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column v-if="canPriceView" label="单价" width="150">
+        <el-table-column label="单价" width="150">
           <template #default="{ row }">
             <el-input-number
+              v-if="canPriceView"
               v-model="row.price"
               :min="0"
               :precision="2"
@@ -189,6 +190,7 @@
               style="width: 130px"
               :disabled="!canPriceEdit"
             />
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="采购数量" width="150">
@@ -209,9 +211,9 @@
             />
           </template>
         </el-table-column>
-        <el-table-column v-if="canPriceView" label="金额" width="140">
+        <el-table-column label="金额" width="140">
           <template #default="{ row }">
-            {{ formatAmount((Number(row.price) || 0) * (Number(row.qty) || 0)) }}
+            {{ canPriceView ? formatAmount((Number(row.price) || 0) * (Number(row.qty) || 0)) : '-' }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="90">
@@ -221,8 +223,8 @@
         </el-table-column>
       </el-table>
 
-      <div v-if="canPriceView" style="display: flex; justify-content: flex-end; margin-top: 10px; font-weight: 600">
-        合计：{{ formatAmount(totalAmount) }}
+      <div style="display: flex; justify-content: flex-end; margin-top: 10px; font-weight: 600">
+        合计：{{ canPriceView ? formatAmount(totalAmount) : '-' }}
       </div>
     </el-form>
     <template #footer>

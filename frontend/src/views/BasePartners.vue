@@ -30,6 +30,18 @@
       <el-table-column prop="phone" label="电话" width="150" />
       <el-table-column prop="email" label="邮箱" min-width="200" />
       <el-table-column prop="creditLimit" label="信用额度" width="120" />
+      <el-table-column label="已占用额度" width="120">
+        <template #default="{ row }">
+          <span v-if="row.type === 2">{{ fmtMoney(creditUsageById[row.id]?.usedAmount) }}</span>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="可用额度" width="120">
+        <template #default="{ row }">
+          <span v-if="row.type === 2">{{ fmtMoney(creditUsageById[row.id]?.availableAmount) }}</span>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag v-if="row.status === 1" type="success">启用</el-tag>
@@ -101,6 +113,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElLoading, ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { createPartner, deletePartner, listPartners, updatePartner, type BasePartner } from '../api/base'
 import { baseExcel, type ImportResult } from '../api/base-excel'
+import { listSalesCustomerCreditUsage, type SalCreditUsage } from '../api/sales'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -117,6 +130,7 @@ const size = ref(10)
 const total = ref(0)
 const rows = ref<BasePartner[]>([])
 const keyword = ref('')
+const creditUsageById = ref<Record<number, SalCreditUsage>>({})
 
 const dialogVisible = ref(false)
 const mode = ref<'create' | 'edit'>('create')
@@ -138,12 +152,34 @@ function errText(e: any, fallback: string) {
   return e?.response?.data?.message || e?.message || fallback
 }
 
+function fmtMoney(v: any) {
+  if (v === null || v === undefined) return '-'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '-'
+  return n.toFixed(2).replace(/\.00$/, '')
+}
+
 async function reload() {
   loading.value = true
   try {
     const data = await listPartners({ page: page.value, size: size.value, keyword: keyword.value || undefined })
     rows.value = data.content
     total.value = data.totalElements
+    creditUsageById.value = {}
+    const customerIds = (rows.value || []).filter((r) => r.type === 2 && r.id).map((r) => Number(r.id))
+    if (customerIds.length > 0) {
+      try {
+        const usageRows = await listSalesCustomerCreditUsage(customerIds)
+        const m: Record<number, SalCreditUsage> = {}
+        for (const u of usageRows || []) {
+          if (!u?.customerId) continue
+          m[Number(u.customerId)] = u
+        }
+        creditUsageById.value = m
+      } catch {
+        creditUsageById.value = {}
+      }
+    }
   } finally {
     loading.value = false
   }

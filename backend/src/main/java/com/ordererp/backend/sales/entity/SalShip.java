@@ -19,6 +19,9 @@ public class SalShip {
     @Column(name = "ship_no", nullable = false)
     private String shipNo;
 
+    @Column(name = "request_no")
+    private String requestNo;
+
     @Column(name = "order_id", nullable = false)
     private Long orderId;
 
@@ -84,6 +87,14 @@ public class SalShip {
 
     public void setShipNo(String shipNo) {
         this.shipNo = shipNo;
+    }
+
+    public String getRequestNo() {
+        return requestNo;
+    }
+
+    public void setRequestNo(String requestNo) {
+        this.requestNo = requestNo;
     }
 
     public Long getOrderId() {

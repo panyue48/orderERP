@@ -17,6 +17,8 @@ import org.springframework.data.repository.query.Param;
 public interface SalShipRepository extends JpaRepository<SalShip, Long> {
     List<SalShip> findByOrderIdOrderByIdAsc(Long orderId);
 
+    Optional<SalShip> findFirstByRequestNo(String requestNo);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from SalShip s where s.id = :id")
     Optional<SalShip> findByIdForUpdate(@Param("id") Long id);

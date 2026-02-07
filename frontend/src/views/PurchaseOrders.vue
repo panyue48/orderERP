@@ -20,7 +20,9 @@
       <el-table-column prop="orderNo" label="单号" width="220" />
       <el-table-column prop="orderDate" label="日期" width="120" />
       <el-table-column prop="supplierName" label="供应商" min-width="180" />
-      <el-table-column v-if="canPriceView" prop="totalAmount" label="总额" width="120" />
+      <el-table-column label="总额" width="120">
+        <template #default="{ row }">{{ canPriceView ? row.totalAmount ?? '-' : '-' }}</template>
+      </el-table-column>
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-tag v-if="row.status === 4" type="success">已完成</el-tag>
@@ -58,7 +60,7 @@
         <el-descriptions-item label="单号">{{ detail.orderNo }}</el-descriptions-item>
         <el-descriptions-item label="供应商">{{ detail.supplierName }}</el-descriptions-item>
         <el-descriptions-item label="日期">{{ detail.orderDate }}</el-descriptions-item>
-        <el-descriptions-item v-if="canPriceView" label="总额">{{ detail.totalAmount }}</el-descriptions-item>
+        <el-descriptions-item label="总额">{{ canPriceView ? detail.totalAmount ?? '-' : '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag v-if="detail.status === 4" type="success">已完成</el-tag>
           <el-tag v-else-if="detail.status === 3" type="warning">部分入库</el-tag>
@@ -77,9 +79,13 @@
         <el-table-column prop="productCode" label="SKU" width="160" />
         <el-table-column prop="productName" label="商品名称" min-width="240" />
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column v-if="canPriceView" prop="price" label="单价" width="120" />
+        <el-table-column label="单价" width="120">
+          <template #default="{ row }">{{ canPriceView ? row.price ?? '-' : '-' }}</template>
+        </el-table-column>
         <el-table-column prop="qty" label="采购数量" width="120" />
-        <el-table-column v-if="canPriceView" prop="amount" label="金额" width="120" />
+        <el-table-column label="金额" width="120">
+          <template #default="{ row }">{{ canPriceView ? row.amount ?? '-' : '-' }}</template>
+        </el-table-column>
         <el-table-column prop="inQty" label="已入库" width="120" />
       </el-table>
     </div>
