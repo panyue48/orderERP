@@ -161,13 +161,17 @@ class SalesStage5ArBillIT {
         var auditedBill = arBillService.audit(bill.id(), "auditor");
         assertEquals(2, auditedBill.status());
 
-        var r1 = arBillService.addReceipt(bill.id(), new SalArReceiptCreateRequest(today, new BigDecimal("10.00"), "bank", "part"), "cashier");
+        var r1 = arBillService.addReceipt(bill.id(),
+                new SalArReceiptCreateRequest(today, new BigDecimal("10.00"), null, "bank", "part"),
+                "cashier");
         assertNotNull(r1.id());
         var d1 = arBillService.detail(bill.id());
         assertEquals(3, d1.bill().status());
         assertTrue(new BigDecimal("10.00").compareTo(d1.bill().receivedAmount()) == 0);
 
-        var r2 = arBillService.addReceipt(bill.id(), new SalArReceiptCreateRequest(today, new BigDecimal("2.00"), "bank", "rest"), "cashier");
+        var r2 = arBillService.addReceipt(bill.id(),
+                new SalArReceiptCreateRequest(today, new BigDecimal("2.00"), null, "bank", "rest"),
+                "cashier");
         assertNotNull(r2.id());
         var d2 = arBillService.detail(bill.id());
         assertEquals(4, d2.bill().status());

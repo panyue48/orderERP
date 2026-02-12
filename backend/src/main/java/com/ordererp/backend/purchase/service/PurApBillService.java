@@ -2,6 +2,7 @@ package com.ordererp.backend.purchase.service;
 
 import com.ordererp.backend.base.entity.BasePartner;
 import com.ordererp.backend.base.repository.BasePartnerRepository;
+import com.ordererp.backend.finance.service.FinPaymentService;
 import com.ordererp.backend.purchase.dto.PurApBillCreateRequest;
 import com.ordererp.backend.purchase.dto.PurApBillDetailResponse;
 import com.ordererp.backend.purchase.dto.PurApBillDocResponse;
@@ -62,16 +63,18 @@ public class PurApBillService {
     private final PurApPaymentRepository paymentRepository;
     private final PurApInvoiceRepository invoiceRepository;
     private final BasePartnerRepository partnerRepository;
+    private final FinPaymentService finPaymentService;
 
     public PurApBillService(PurApBillRepository billRepository, PurApBillDetailRepository billDetailRepository,
             PurApDocRefRepository docRefRepository, PurApPaymentRepository paymentRepository,
-            PurApInvoiceRepository invoiceRepository, BasePartnerRepository partnerRepository) {
+            PurApInvoiceRepository invoiceRepository, BasePartnerRepository partnerRepository, FinPaymentService finPaymentService) {
         this.billRepository = billRepository;
         this.billDetailRepository = billDetailRepository;
         this.docRefRepository = docRefRepository;
         this.paymentRepository = paymentRepository;
         this.invoiceRepository = invoiceRepository;
         this.partnerRepository = partnerRepository;
+        this.finPaymentService = finPaymentService;
     }
 
     public Page<PurApBillResponse> page(String keyword, Long supplierId, LocalDate startDate, LocalDate endDate, Pageable pageable) {
@@ -466,6 +469,20 @@ public class PurApBillService {
         p.setCreateTime(now);
         p = paymentRepository.saveAndFlush(p);
 
+        finPaymentService.recordPayment(
+                p.getPayNo(),
+                FinPaymentService.TYPE_PAYMENT,
+                bill.getSupplierId(),
+                request.accountId(),
+                amt,
+                FinPaymentService.BIZ_TYPE_PURCHASE_AP_PAYMENT,
+                p.getId(),
+                bill.getBillNo(),
+                p.getPayDate(),
+                p.getMethod(),
+                p.getRemark(),
+                operator);
+
         bill.setPaidAmount(paid.add(amt));
         billRepository.save(bill);
         refreshPaidInvoiceAndStatus(bill);
@@ -487,6 +504,7 @@ public class PurApBillService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "付款记录不属于该对账单");
         }
         if (Objects.equals(p.getStatus(), PAYMENT_STATUS_CANCELED)) {
+            finPaymentService.cancelByBiz(FinPaymentService.BIZ_TYPE_PURCHASE_AP_PAYMENT, p.getId(), operator);
             return toPaymentResponse(p);
         }
         if (!Objects.equals(p.getStatus(), PAYMENT_STATUS_COMPLETED)) {
@@ -508,6 +526,7 @@ public class PurApBillService {
         billRepository.save(bill);
         refreshPaidInvoiceAndStatus(bill);
 
+        finPaymentService.cancelByBiz(FinPaymentService.BIZ_TYPE_PURCHASE_AP_PAYMENT, p.getId(), operator);
         return toPaymentResponse(p);
     }
 

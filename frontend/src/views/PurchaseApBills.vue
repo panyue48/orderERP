@@ -253,6 +253,16 @@
       <el-form-item label="付款日期">
         <el-date-picker v-model="payForm.payDate" type="date" value-format="YYYY-MM-DD" style="width: 220px" />
       </el-form-item>
+      <el-form-item v-if="accounts.length > 0" label="付款账户">
+        <el-select v-model="payForm.accountId" placeholder="默认账户" style="width: 220px">
+          <el-option
+            v-for="a in accounts"
+            :key="a.id"
+            :label="`${a.accountName}（余额：${formatMoney(Number(a.balance || 0))}）`"
+            :value="a.id"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item label="付款金额">
         <el-input-number v-model="payForm.amount" :min="0" :precision="2" controls-position="right" style="width: 220px" />
       </el-form-item>
@@ -312,6 +322,7 @@ import {
   type PurApBill,
   type PurApBillDetail
 } from '../api/purchase'
+import { listFinanceAccountOptions, type FinAccountOption } from '../api/finance'
 import { useAuthStore } from '../stores/auth'
 
 type PartnerOption = { id: number; partnerCode: string; partnerName: string; type: number }
@@ -352,12 +363,15 @@ const regenerating = ref(false)
 
 const payVisible = ref(false)
 const paying = ref(false)
-const payForm = ref<{ payDate: string; amount: number; method?: string; remark?: string }>({
+const payForm = ref<{ payDate: string; accountId?: number; amount: number; method?: string; remark?: string }>({
   payDate: new Date().toISOString().slice(0, 10),
+  accountId: undefined,
   amount: 0,
   method: '',
   remark: ''
 })
+
+const accounts = ref<FinAccountOption[]>([])
 
 const invoiceVisible = ref(false)
 const invoicing = ref(false)
@@ -403,6 +417,14 @@ function formatMoney(v: number) {
 async function loadSuppliers() {
   const res = await http.get<PartnerOption[]>('/api/base/partners/options', { params: { limit: 800 } })
   suppliers.value = (res.data || []).filter((p) => p.type === 1)
+}
+
+async function loadAccounts() {
+  try {
+    accounts.value = await listFinanceAccountOptions({ limit: 50 })
+  } catch {
+    accounts.value = []
+  }
 }
 
 async function reload() {
@@ -522,8 +544,10 @@ async function doCancel(id: number) {
 }
 
 function openPay() {
+  const defaultAccountId = accounts.value?.[0]?.id
   payForm.value = {
     payDate: new Date().toISOString().slice(0, 10),
+    accountId: defaultAccountId,
     amount: Number(outstandingAmount.value.toFixed(2)),
     method: '',
     remark: ''
@@ -544,6 +568,7 @@ async function submitPay() {
     await addPurchaseApPayment(b.id, {
       payDate: payForm.value.payDate,
       amount,
+      accountId: payForm.value.accountId || undefined,
       method: payForm.value.method || undefined,
       remark: payForm.value.remark || undefined
     })
@@ -632,6 +657,9 @@ onMounted(async () => {
   await Promise.all([
     loadSuppliers().catch(() => {
       suppliers.value = []
+    }),
+    loadAccounts().catch(() => {
+      accounts.value = []
     }),
     reload()
   ])

@@ -117,7 +117,7 @@ export async function cancelSalesArBill(id: number) {
 
 export async function addSalesArReceipt(
   billId: number,
-  payload: { receiptDate?: string; amount: number; method?: string; remark?: string }
+  payload: { receiptDate?: string; amount: number; accountId?: number; method?: string; remark?: string }
 ) {
   const res = await http.post<SalArReceipt>(`/api/sales/ar-bills/${billId}/receipts`, payload)
   return res.data
@@ -140,4 +140,3 @@ export async function cancelSalesArInvoice(billId: number, invoiceId: number) {
   const res = await http.post<SalArInvoice>(`/api/sales/ar-bills/${billId}/invoices/${invoiceId}/cancel`)
   return res.data
 }
-

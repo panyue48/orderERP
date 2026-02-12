@@ -338,7 +338,7 @@ export async function cancelPurchaseApBill(id: number) {
 
 export async function addPurchaseApPayment(
   billId: number,
-  payload: { payDate?: string; amount: number; method?: string; remark?: string }
+  payload: { payDate?: string; amount: number; accountId?: number; method?: string; remark?: string }
 ) {
   const res = await http.post<PurApPayment>(`/api/purchase/ap-bills/${billId}/payments`, payload)
   return res.data

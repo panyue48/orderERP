@@ -5,9 +5,9 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 public record SalArReceiptCreateRequest(
-        @NotNull LocalDate receiptDate,
+        LocalDate receiptDate,
         @NotNull BigDecimal amount,
+        Long accountId,
         String method,
         String remark) {
 }
-

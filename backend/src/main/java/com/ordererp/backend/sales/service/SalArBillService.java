@@ -2,6 +2,7 @@ package com.ordererp.backend.sales.service;
 
 import com.ordererp.backend.base.entity.BasePartner;
 import com.ordererp.backend.base.repository.BasePartnerRepository;
+import com.ordererp.backend.finance.service.FinPaymentService;
 import com.ordererp.backend.sales.dto.SalArBillCreateRequest;
 import com.ordererp.backend.sales.dto.SalArBillDetailResponse;
 import com.ordererp.backend.sales.dto.SalArBillDocResponse;
@@ -62,16 +63,18 @@ public class SalArBillService {
     private final SalArReceiptRepository receiptRepository;
     private final SalArInvoiceRepository invoiceRepository;
     private final BasePartnerRepository partnerRepository;
+    private final FinPaymentService finPaymentService;
 
     public SalArBillService(SalArBillRepository billRepository, SalArBillDetailRepository billDetailRepository,
             SalArDocRefRepository docRefRepository, SalArReceiptRepository receiptRepository,
-            SalArInvoiceRepository invoiceRepository, BasePartnerRepository partnerRepository) {
+            SalArInvoiceRepository invoiceRepository, BasePartnerRepository partnerRepository, FinPaymentService finPaymentService) {
         this.billRepository = billRepository;
         this.billDetailRepository = billDetailRepository;
         this.docRefRepository = docRefRepository;
         this.receiptRepository = receiptRepository;
         this.invoiceRepository = invoiceRepository;
         this.partnerRepository = partnerRepository;
+        this.finPaymentService = finPaymentService;
     }
 
     public Page<SalArBillResponse> page(String keyword, Long customerId, LocalDate startDate, LocalDate endDate, Pageable pageable) {
@@ -449,6 +452,20 @@ public class SalArBillService {
         r.setCreateTime(now);
         r = receiptRepository.saveAndFlush(r);
 
+        finPaymentService.recordPayment(
+                r.getReceiptNo(),
+                FinPaymentService.TYPE_RECEIPT,
+                bill.getCustomerId(),
+                request.accountId(),
+                amt,
+                FinPaymentService.BIZ_TYPE_SALES_AR_RECEIPT,
+                r.getId(),
+                bill.getBillNo(),
+                r.getReceiptDate(),
+                r.getMethod(),
+                r.getRemark(),
+                operator);
+
         bill.setReceivedAmount(received.add(amt));
         billRepository.save(bill);
         refreshReceivedInvoiceAndStatus(bill);
@@ -470,6 +487,7 @@ public class SalArBillService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "收款记录不属于该对账单");
         }
         if (Objects.equals(r.getStatus(), RECEIPT_STATUS_CANCELED)) {
+            finPaymentService.cancelByBiz(FinPaymentService.BIZ_TYPE_SALES_AR_RECEIPT, r.getId(), operator);
             return toReceiptResponse(r);
         }
         if (!Objects.equals(r.getStatus(), RECEIPT_STATUS_COMPLETED)) {
@@ -491,6 +509,7 @@ public class SalArBillService {
         billRepository.save(bill);
         refreshReceivedInvoiceAndStatus(bill);
 
+        finPaymentService.cancelByBiz(FinPaymentService.BIZ_TYPE_SALES_AR_RECEIPT, r.getId(), operator);
         return toReceiptResponse(r);
     }
 

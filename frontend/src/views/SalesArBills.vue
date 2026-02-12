@@ -242,6 +242,16 @@
       <el-form-item label="收款日期">
         <el-date-picker v-model="receiptForm.receiptDate" type="date" value-format="YYYY-MM-DD" style="width: 220px" />
       </el-form-item>
+      <el-form-item v-if="accounts.length > 0" label="收款账户">
+        <el-select v-model="receiptForm.accountId" placeholder="默认账户" style="width: 220px">
+          <el-option
+            v-for="a in accounts"
+            :key="a.id"
+            :label="`${a.accountName}（余额：${formatMoney(Number(a.balance || 0))}）`"
+            :value="a.id"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item label="收款金额">
         <el-input-number v-model="receiptForm.amount" :min="0" :precision="2" controls-position="right" style="width: 220px" />
         <span style="margin-left: 10px; color: #888">未收：{{ formatMoney(outstandingAmount) }}</span>
@@ -302,6 +312,7 @@ import {
   type SalArBill,
   type SalArBillDetail
 } from '../api/sales-ar'
+import { listFinanceAccountOptions, type FinAccountOption } from '../api/finance'
 import { useAuthStore } from '../stores/auth'
 
 type PartnerOption = { id: number; partnerCode: string; partnerName: string; type: number }
@@ -342,12 +353,15 @@ const regenerating = ref(false)
 
 const receiptVisible = ref(false)
 const receipting = ref(false)
-const receiptForm = ref<{ receiptDate: string; amount: number; method?: string; remark?: string }>({
+const receiptForm = ref<{ receiptDate: string; accountId?: number; amount: number; method?: string; remark?: string }>({
   receiptDate: new Date().toISOString().slice(0, 10),
+  accountId: undefined,
   amount: 0,
   method: '',
   remark: ''
 })
+
+const accounts = ref<FinAccountOption[]>([])
 
 const invoiceVisible = ref(false)
 const invoicing = ref(false)
@@ -393,6 +407,14 @@ function formatMoney(v: number) {
 async function loadCustomers() {
   const res = await http.get<PartnerOption[]>('/api/base/partners/options', { params: { limit: 800 } })
   customers.value = (res.data || []).filter((p) => p.type === 2)
+}
+
+async function loadAccounts() {
+  try {
+    accounts.value = await listFinanceAccountOptions({ limit: 50 })
+  } catch {
+    accounts.value = []
+  }
 }
 
 async function reload() {
@@ -510,8 +532,10 @@ async function doCancel(id: number) {
 }
 
 function openReceipt() {
+  const defaultAccountId = accounts.value?.[0]?.id
   receiptForm.value = {
     receiptDate: new Date().toISOString().slice(0, 10),
+    accountId: defaultAccountId,
     amount: Number(outstandingAmount.value.toFixed(2)),
     method: '',
     remark: ''
@@ -531,6 +555,7 @@ async function submitReceipt() {
     await addSalesArReceipt(detail.value.bill.id, {
       receiptDate: receiptForm.value.receiptDate,
       amount,
+      accountId: receiptForm.value.accountId || undefined,
       method: receiptForm.value.method || undefined,
       remark: receiptForm.value.remark || undefined
     })
@@ -613,7 +638,7 @@ async function cancelInvoice(invoiceId: number) {
 
 onMounted(async () => {
   await loadCustomers()
+  await loadAccounts()
   await reload()
 })
 </script>
-

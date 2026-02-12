@@ -7,7 +7,7 @@ import java.time.LocalDate;
 public record PurApPaymentCreateRequest(
         LocalDate payDate,
         @NotNull BigDecimal amount,
+        Long accountId,
         String method,
         String remark) {
 }
-
