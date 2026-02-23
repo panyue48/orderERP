@@ -47,3 +47,6 @@ uploads/
 ## Local test data files
 _test_*.xlsx
 
+## Local markdown guidance docs
+md指导文件/
+
